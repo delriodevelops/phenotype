@@ -44,19 +44,23 @@ export function facePercentile(psl) {
   return 99.99;
 }
 
-// Hypergamy as the lookism folklore draws it, on the SMV percentile (a toy scheme, and the page says so):
-//   stable: each ends up with their equal, the same percentile of the other sex;
-//   apps:   women choose upwards, so a man at percentile p reaches women up to p^K and, seen from the other side of
-//           the same curve, a woman at p draws men up to p^(1/K). K = 2.5: a P50 man reaches P18, a P50 woman P76.
-const HYPER_K = 2.5;
+// Hypergamy as the lookism folklore draws it, on the tier the SMV percentile falls in (a toy scheme, and the page
+// says so). It is counted in tiers, not percentiles: the top tiers are a few people in a hundred, so a curve on the
+// percentile never climbs them, and the scheme's whole point is that women's choices do.
+//   stable: each ends up with their equal, the same tier of the other sex;
+//   apps:   women choose upwards, HYPER_REACH tiers above their own; so men reach as many tiers below theirs.
+// The two are one set of pairs seen from either side: he reaches her exactly when she reaches him.
+export const HYPER_REACH = 2;
 const TIER_PCT = [20, 50, 75, 93, 99, 99.9]; // the share of faces under each tier cut (BANDS below)
 export const tierIndexAtPercentile = (q) => TIER_PCT.filter((c) => q >= c).length;
-export function hypergamy(pct, sex) {
+export function hypergamyAt(index, sex) { // from a tier (0–6) rather than a percentile
   const s = sex === 'f' ? 'f' : 'm', other = s === 'f' ? 'm' : 'f', names = tierNames(other);
+  const at = (i) => ({ index: i, tier: names[i] });
+  return { sex: s, other, apps: at(Math.round(clamp(index + (s === 'f' ? HYPER_REACH : -HYPER_REACH), 0, 6))), stable: at(index) };
+}
+export function hypergamy(pct, sex) {
   const p = clamp(Number.isFinite(pct) ? pct : 50, 0.1, 99.9);
-  const apps = 100 * (p / 100) ** (s === 'f' ? 1 / HYPER_K : HYPER_K);
-  const at = (q) => ({ pct: q, index: tierIndexAtPercentile(q), tier: names[tierIndexAtPercentile(q)] });
-  return { sex: s, other, own: p, apps: at(apps), stable: at(p) };
+  return { ...hypergamyAt(tierIndexAtPercentile(p), sex), own: p };
 }
 
 // The geometry nudge on the browser's PSL: ±0.3 at most, from how many of the landmark measures sit inside their

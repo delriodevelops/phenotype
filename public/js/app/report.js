@@ -2,7 +2,7 @@
 // the readings for whoever wants more — tier · PSL · where you fall among a hundred, natural and extreme potential
 // with advice, and every measure against its ideal.
 import { IDEALS } from './face.js';
-import { tierFor, tierLabel, tierNames, hypergamy, TIER_CUTS, NATURAL_RECS, EXTREME_RECS } from './score.js';
+import { tierFor, tierLabel, tierNames, hypergamy, hypergamyAt, TIER_CUTS, NATURAL_RECS, EXTREME_RECS } from './score.js';
 import { cardScene, tierIndex, topText, pickMeasures } from './card.js';
 import { shareableMarkup, mountShareable } from './shareable.js';
 import { measureLines } from './breakdown.js';
@@ -39,47 +39,47 @@ const EXAMPLES = { // 720×900 portraits; f: one generated face (not a real pers
   f: ['sub5', 'ltb', 'mtb', 'htb', 'stacylite', 'stacy', 'trueeve'].map((id) => `img/case/eve/${id}.webp`),
 };
 const CROP = { m: '150 170 420 420', f: '150 110 420 420' }; // the square of each portrait that holds the face
-const TIER_MID = [10, 35, 62.5, 84, 96, 99.45, 99.95]; // the middle percentile of each tier's band
 const pslRange = (i) => (i === 0 ? `PSL <${TIER_CUTS[0]}` : i === 6 ? `PSL ${TIER_CUTS[5]}+` : `PSL ${TIER_CUTS[i - 1]}–${TIER_CUTS[i]}`);
-function schemeMarkup(h) {
+// self: the visitor's own cut-out (bust.thumb(), 120×168), which stands in their row instead of the example
+function schemeMarkup(h, self) {
   const span = (r) => [Math.min(r.apps.index, r.stable.index), Math.max(r.apps.index, r.stable.index)];
   const you = h.stable.index, mine = span(h), T = 40, y = (i) => 46 + (6 - i) * 50, LX = 100, RX = 240;
   const reach = (i) => i >= mine[0] && i <= mine[1];
   const own = tierNames(h.sex), other = tierNames(h.other);
   let faint = '', lit = '', figs = '';
-  const face = (x, i, sex, cls) => {
-    const src = EXAMPLES[sex]?.[i], x0 = x - T / 2, y0 = y(i) - T / 2;
+  const face = (x, i, sex, cls, mine) => {
+    const src = mine || EXAMPLES[sex]?.[i], x0 = x - T / 2, y0 = y(i) - T / 2;
     return `<g class="face${cls}">${src
-      ? `<svg x="${x0}" y="${y0}" width="${T}" height="${T}" viewBox="${CROP[sex]}"><image href="${src}" width="720" height="900"/></svg>`
+      ? `<svg x="${x0}" y="${y0}" width="${T}" height="${T}" viewBox="${mine ? '8 30 104 104' : CROP[sex]}"><image href="${esc(src)}" width="${mine ? 120 : 720}" height="${mine ? 168 : 900}"/></svg>`
       : `<g class="fig" transform="translate(${x} ${y(i) + 2}) scale(1.35)"><circle cy="-10" r="3"/><path d="${FIG[sex]}"/></g>`}<rect x="${x0}" y="${y0}" width="${T}" height="${T}"/></g>`;
   };
   const tag = (x, i, anchor, cls, a, b) => `<text x="${x}" y="${y(i) - 2}" text-anchor="${anchor}"${cls ? ` class="${cls}"` : ''}>${esc(a)}<tspan x="${x}" dy="11" class="sub">${esc(b)}</tspan></text>`;
   for (let i = 0; i < 7; i++) {
-    const [lo, hi] = i === you ? mine : span(hypergamy(TIER_MID[i], h.sex));
+    const [lo, hi] = i === you ? mine : span(hypergamyAt(i, h.sex));
     for (let o = lo; o <= hi; o++) {
       const line = `<line x1="${LX + T / 2 + 4}" y1="${y(i)}" x2="${RX - T / 2 - 7}" y2="${y(o)}"`;
       if (i === you) lit += `${line}${o === you ? ' class="is-equal"' : ''} marker-end="url(#hy-a)"/>`; else faint += `${line}/>`;
     }
-    figs += face(LX, i, h.sex, i === you ? ' is-you' : '') + face(RX, i, h.other, reach(i) ? ' is-reach' : '')
+    figs += face(LX, i, h.sex, i === you ? ' is-you' : '', i === you ? self : null) + face(RX, i, h.other, reach(i) ? ' is-reach' : '')
       + tag(LX - T / 2 - 8, i, 'end', i === you ? 'is-you' : '', own[i], i === you ? `Tú · ${P(h.own)}` : pslRange(i))
       + tag(RX + T / 2 + 8, i, 'start', reach(i) ? 'is-reach' : '', other[i], pslRange(i));
   }
   const f = h.sex === 'f';
-  return `<svg class="scheme" viewBox="0 0 340 ${y(0) + T / 2 + 6}" role="img" aria-label="Esquema de hipergamia: en apps hasta ${esc(h.apps.tier)}, en pareja estable ${esc(h.stable.tier)}">
+  return `<svg class="scheme" viewBox="0 0 340 ${y(0) + T / 2 + 6}" role="img" aria-label="Esquema de hipergamia: en apps de ${esc(other[mine[0]])} a ${esc(other[mine[1]])}, en pareja estable ${esc(h.stable.tier)}">
           <defs><marker id="hy-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L8 4L0 8z"/></marker></defs>
           <text x="${LX}" y="12" text-anchor="middle">${f ? 'Mujeres' : 'Hombres'}</text><text x="${RX}" y="12" text-anchor="middle">${f ? 'Hombres' : 'Mujeres'}</text>
           <g class="scheme__all">${faint}</g><g class="scheme__you">${lit}</g>${figs}
         </svg>`;
 }
-export function hypergamyMarkup(pct, sex) {
+export function hypergamyMarkup(pct, sex, self = null) {
   const h = hypergamy(pct.now, sex), nat = hypergamy(pct.natural, sex), f = sex === 'f', them = f ? 'hombres' : 'mujeres';
-  const gain = nat.apps.index > h.apps.index ? ` Con tu potencial natural, en apps ${f ? 'llegarías' : 'subirías'} hasta <b>${esc(nat.apps.tier)}</b>.` : '';
+  const gain = nat.stable.index > h.stable.index ? ` Con tu potencial natural, ${f ? `en apps llegarías hasta <b>${esc(nat.apps.tier)}</b>` : `tu igual pasaría a ser <b>${esc(nat.stable.tier)}</b>`}.` : '';
   return `<div class="block" data-at="end">
         <h3 class="h3">Hipergamia</h3>
-        ${schemeMarkup(h)}
+        ${schemeMarkup(h, self)}
         <p class="hyper__t">${f
     ? `En apps eliges hacia arriba: tu SMV (${P(h.own)} de mujeres) atrae a ${them} hasta <b>${esc(h.apps.tier)}</b>. Para pareja estable, el que se queda es tu igual: <b>${esc(h.stable.tier)}</b>.`
-    : `En apps ellas eligen hacia arriba: tu SMV (${P(h.own)} de hombres) te da acceso a ${them} hasta <b>${esc(h.apps.tier)}</b>. Para pareja estable, tu igual: <b>${esc(h.stable.tier)}</b>.`}${gain}</p>
+    : `En apps ellas eligen hacia arriba: tu SMV (${P(h.own)} de hombres) te da acceso a ${them} ${h.apps.index < h.stable.index ? `de <b>${esc(h.apps.tier)}</b> a <b>${esc(h.stable.tier)}</b>` : `<b>${esc(h.stable.tier)}</b>`}, de tu tier hacia abajo. Para pareja estable, tu igual: <b>${esc(h.stable.tier)}</b>.`}${gain}</p>
         <p class="disclaimer">Esquema del folclore lookism aplicado a tu SMV: en apps la atención se concentra arriba, en pareja estable cada uno acaba con su igual. Es un juego, no un dato sobre personas reales.</p>
       </div>`;
 }
@@ -109,7 +109,7 @@ export function renderResult(root, { scores: s, metrics: m = {}, bust, stage, pr
         </dl>
         ${assumed.length && !demo ? `<p class="disclaimer">Supuesto (sin responder): ${esc(assumed.join(', '))}. Rellena los datos opcionales para afinar el SMV.</p>` : ''}
       </div>
-      ${hypergamyMarkup(s.percentile, sex)}
+      ${hypergamyMarkup(s.percentile, sex, bust?.thumb?.())}
       <div class="block" data-at="end">
         <h3 class="h3">Cómo subir</h3>
         <div class="pots">
