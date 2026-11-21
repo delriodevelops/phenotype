@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+/* Motion policy: always animated. The visitor's own choice (the reduce-motion button, or ?motion=reduced|full)
+   decides; the operating system's reduced-motion setting does not. Every matchMedia query about
+   prefers-reduced-motion (gsap.matchMedia and Lenis included) gets that choice, and <html data-motion> carries it
+   for CSS. The button's label says what a press will do (no aria-pressed on top of it), and a keyboard press
+   gets focus back on the button after the reload. */
+(function () {
+  var KEY = 'motion', choice = null;
+  try {
+    var q = new URLSearchParams(location.search).get('motion');
+    if (q === 'reduced' || q === 'full') localStorage.setItem(KEY, q);
+    choice = localStorage.getItem(KEY) || q;
+  } catch (e) { choice = new URLSearchParams(location.search).get('motion'); }
+  var reduced = choice === 'reduced';
+  var root = document.documentElement;
+  root.setAttribute('data-motion', reduced ? 'reduced' : 'full');
+  var native = window.matchMedia && window.matchMedia.bind(window);
+  if (native) {
+    var RX = /\(\s*prefers-reduced-motion\s*(?::\s*(reduce|no-preference)\s*)?\)/g;
+    var ONLY = /^\s*\(\s*prefers-reduced-motion\s*(?::\s*(reduce|no-preference)\s*)?\)\s*$/;
+    var holds = function (value) { return ((value || 'reduce') === 'reduce') === reduced; };
+    window.matchMedia = function (query) {
+      query = String(query);
+      if (query.indexOf('prefers-reduced-motion') === -1) return native(query);
+      var only = ONLY.exec(query);
+      if (only) return native(holds(only[1]) ? 'all' : 'not all');
+      return native(query.replace(RX, function (_, value) {
+        return holds(value) ? '(min-width: 0px)' : '(max-width: 0px)';
+      }));
+    };
+  }
+  function label(b) {
+    var t = reduced ? b.getAttribute('data-label-reduced') : b.getAttribute('data-label-full');
+    if (t) (b.querySelector('[data-motion-label]') || b).textContent = t;
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    var toggles = document.querySelectorAll('[data-motion-toggle]');
+    Array.prototype.forEach.call(toggles, label);
+    try {
+      var i = sessionStorage.getItem('motion-focus');
+      if (i !== null) { sessionStorage.removeItem('motion-focus'); if (toggles[+i]) toggles[+i].focus({ preventScroll: true }); }
+    } catch (e) {}
+  });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-motion-toggle]');
+    if (!b) return;
+    var next = reduced ? 'full' : 'reduced';
+    var url = new URL(location.href);
+    try { localStorage.setItem(KEY, next); url.searchParams.delete('motion'); }
+    catch (err) { url.searchParams.set('motion', next); }
+    try {
+      if (e.detail === 0) sessionStorage.setItem('motion-focus', String(Array.prototype.indexOf.call(document.querySelectorAll('[data-motion-toggle]'), b)));
+    } catch (err) {}
+    location.replace(url.href);
+  });
+})();
+</script>
+  <title>Cómo funciona — PHENOTYPE</title>
+  <meta name="description" content="Cómo mide PHENOTYPE una cara: detección, aislamiento, el modelo y su precisión, la escala PSL y SMV, la evolución de una cara de Sub-5 a True Adam, cómo subir de tier, privacidad y preguntas frecuentes.">
+  <meta name="theme-color" content="#05070a">
+  <meta property="og:title" content="Cómo funciona PHENOTYPE">
+  <meta property="og:description" content="El método, la escala, la precisión y la privacidad del escáner facial PSL.">
+  <meta property="og:type" content="article">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2305070a'/%3E%3Cpath d='M6 6h6M6 6v6M26 26h-6M26 26v-6' stroke='%23c6ff3d' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23d7dde5'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;700;900&display=swap">
+  <link rel="stylesheet" href="css/ui.css">
+  <script type="module" src="js/app/evolve.js"></script>
+</head>
+<body>
+  <header class="hud">
+    <a class="hud__brand" href="./"><strong>PHENOTYPE</strong><span>ESCÁNER FACIAL · PSL 1–8</span></a>
+    <nav class="hud__nav" aria-label="Principal">
+      <a class="btn btn--sm btn--go" href="./#analizar">Medir mi cara</a>
+      <button type="button" class="btn btn--sm btn--quiet" data-motion-toggle data-label-full="Calma" data-label-reduced="Animar" title="Activar o quitar las animaciones"><span data-motion-label>Calma</span></button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="sec how-hero" aria-labelledby="t-how">
+      <p class="label">Manual del escáner · <b>v2</b></p>
+      <h1 class="display" id="t-how">Cómo <em>funciona.</em></h1>
+      <p class="lede">Todo lo que no cabe en la portada: qué mide el escáner, con qué precisión, qué significa cada tier, una cara que recorre los siete tiers, cómo se sube de nota y qué pasa con tu foto.</p>
+      <nav class="toc" aria-label="En esta página">
+        <a href="#metodo">01 Método</a><a href="#escala">02 Escala</a><a href="#caso">03 Evolución</a><a href="#subir">04 Cómo subir</a><a href="#glosario">05 Glosario</a><a href="#precision">06 Precisión</a><a href="#privacidad">07 Privacidad</a><a href="#faq">08 Preguntas</a>
+      </nav>
+    </section>
+
+    <section class="sec" id="metodo" aria-labelledby="t-metodo">
+      <div class="sec__head"><h2 class="h2" id="t-metodo">01 · El método</h2><p class="label">4 pasos · todo en tu navegador</p></div>
+      <ol class="steps steps--4">
+        <li><span class="label acc">01 · Detecta</span><h3>478 puntos</h3><p>MediaPipe sitúa 478 puntos sobre cada cara de la foto (hasta 8): giro, inclinación, sonrisa, boca abierta y tamaño. Si la foto no vale (de perfil, muy pequeña, tapada) te lo dice antes de medir.</p></li>
+        <li><span class="label acc">02 · Aísla</span><h3>Solo la cara</h3><p>Recorta la cara, pinta el fondo de un gris neutro y normaliza la luz. Así no puntúan la habitación, el filtro ni la ropa: el modelo se entrenó viendo caras en las mismas condiciones.</p></li>
+        <li><span class="label acc">03 · Mide</span><h3>Un modelo de visión</h3><p>CLIP (ViT-B/32) convierte la cara en 512 números. Una sonda lineal entrenada con miles de valoraciones humanas (MEBeauty) los traduce en una nota, y se corrige el efecto del giro y la expresión.</p></li>
+        <li><span class="label acc">04 · Calibra</span><h3>A la escala PSL</h3><p>La nota se lleva a la escala PSL con 470 valoraciones por tier hechas a mano y se ancla en una referencia real (PSL 5.0). Detecta el sexo y usa un modelo propio para mujeres.</p></li>
+      </ol>
+      <p class="disclaimer">Las medidas geométricas (canthal tilt, FWHR, simetría…) salen de los mismos puntos y se enseñan como referencia: la nota no es una suma de ellas, es lo que ve el modelo en la cara entera.</p>
+    </section>
+
+    <section class="sec" id="escala" aria-labelledby="t-escala">
+      <div class="sec__head"><h2 class="h2" id="t-escala">02 · La escala</h2><p class="label">PSL · SMV · percentil</p></div>
+      <dl class="defs">
+        <div><dt>PSL</dt><dd>De 1 a 8, solo el rostro. Un 4 es la media de la calle; por encima de 7.5 el motor ya no distingue.</dd></div>
+        <div><dt>SMV</dt><dd>De 0 a 100, el valor en el mercado de citas. En hombres el rostro pesa el 45 %; altura, cuerpo y estatus un 15 % cada uno; la soltura social, el 10 %. En mujeres el rostro pesa el 55 % y el cuerpo el 20 %.</dd></div>
+        <div><dt>Percentil</dt><dd>Las personas de tu sexo que quedan por debajo de ti. P80: superas a 80 de cada 100.</dd></div>
+      </dl>
+      <div class="tiertable" role="table" aria-label="Tiers por PSL">
+        <div role="row" class="tiertable__head"><span role="columnheader">PSL</span><span role="columnheader">Percentil</span><span role="columnheader">Hombres</span><span role="columnheader">Mujeres</span></div>
+        <div role="row"><span role="cell">&lt; 3.5</span><span role="cell">P0–20</span><b role="cell">Sub-5</b><b role="cell">Sub-5</b></div>
+        <div role="row"><span role="cell">3.5–4.25</span><span role="cell">P20–50</span><b role="cell">LTN</b><b role="cell">LTB</b></div>
+        <div role="row"><span role="cell">4.25–5</span><span role="cell">P50–75</span><b role="cell">MTN</b><b role="cell">MTB</b></div>
+        <div role="row"><span role="cell">5–5.75</span><span role="cell">P75–93</span><b role="cell">HTN</b><b role="cell">HTB</b></div>
+        <div role="row"><span role="cell">5.75–6.5</span><span role="cell">P93–99</span><b role="cell">Chadlite</b><b role="cell">Stacylite</b></div>
+        <div role="row"><span role="cell">6.5–7.5</span><span role="cell">P99+</span><b role="cell">Chad</b><b role="cell">Stacy</b></div>
+        <div role="row"><span role="cell">≥ 7.5</span><span role="cell">techo</span><b role="cell">True Adam</b><b role="cell">True Eve</b></div>
+      </div>
+      <p class="disclaimer">Chad y True Adam miden lo mismo: 7.5 es el techo del motor. El True Adam no es un tier que se alcance: es el canon contra el que se mide todo lo demás.</p>
+    </section>
+
+    <!-- 03 · the evolution: one face through the seven tiers, seamlessly (js/app/evolve.js). Every tier stands on its
+         own: its own picture, its own numbers, its own description. None is defined from another. -->
+    <section class="sec evo" id="caso" data-evo="data/case.json" aria-labelledby="t-caso">
+      <div class="sec__head"><h2 class="h2" id="t-caso">03 · La evolución: de Sub-5 a True Adam</h2><p class="label">Una cara · siete tiers · sin cortes</p></div>
+      <p class="lede">La misma persona en los siete tiers de la escala. Arrastra la barra, usa las flechas o pulsa reproducir: la cara cambia de forma continua y los números con ella. Cada tier se mide por separado, como una cara distinta: ninguno se define a partir de otro.</p>
+      <div class="evo__stage">
+        <figure class="evo__view" data-evo-view>
+          <img class="evo__poster" data-evo-poster src="img/case/me/sub5.webp" alt="" width="600" height="750">
+          <canvas class="evo__canvas" data-evo-canvas role="img" aria-label="La cara cambiando de un tier al siguiente"></canvas>
+        </figure>
+        <div class="evo__read">
+          <p class="label acc" data-evo-kind>Simulación con IA</p>
+          <h3 class="evo__tier" data-evo-tier aria-live="polite">Sub-5</h3>
+          <dl class="readout">
+            <div><dt>PSL</dt><dd data-evo-psl>2.9</dd></div>
+            <div><dt>Percentil</dt><dd data-evo-pct>P26</dd></div>
+            <div><dt>SMV</dt><dd data-evo-smv>41</dd></div>
+          </dl>
+          <p class="evo__note" data-evo-note>El tejido blando manda: la papada borra el ángulo de la mandíbula y alarga el tercio inferior (44 %), la piel tiene acné activo y bajo los ojos hay edema. Canthal tilt plano.</p>
+          <ul class="measures measures--1"><li><span>Canthal tilt</span><b data-evo-m="canthal_tilt_deg">−0.4°</b></li><li><span>FWHR</span><b data-evo-m="fwhr">1.63</b></li><li><span>Bigonial</span><b data-evo-m="jaw_ratio">0.83</b></li><li><span>Midface</span><b data-evo-m="midface_ratio">0.98</b></li><li><span>Simetría</span><b data-evo-m="symmetry">96</b></li></ul>
+        </div>
+      </div>
+      <div class="evo__rail">
+        <button type="button" class="btn btn--sm evo__play" data-evo-play><span class="evo__play-go">Reproducir</span><span class="evo__play-stop">Parar</span></button>
+        <div class="evo__track">
+          <input class="evo__range" type="range" min="0" max="6" step="0.001" value="0" data-evo-range aria-label="Tier de la evolución">
+          <ol class="evo__ticks"><li><button type="button" data-evo-tick aria-current="true"><b>Sub-5</b><span>2.9</span></button></li><li><button type="button" data-evo-tick aria-current="false"><b>LTN</b><span>3.6</span></button></li><li><button type="button" data-evo-tick aria-current="false"><b>MTN</b><span>4.5</span></button></li><li><button type="button" data-evo-tick aria-current="false"><b>HTN</b><span>5.0</span></button></li><li><button type="button" data-evo-tick aria-current="false"><b>Chadlite</b><span>6.3</span></button></li><li><button type="button" data-evo-tick aria-current="false"><b>Chad</b><span>7.5</span></button></li><li><button type="button" data-evo-tick aria-current="false"><b>True Adam</b><span>7.5</span></button></li></ol>
+        </div>
+      </div>
+      <p class="disclaimer">Sujeto real (fotos del autor, con su consentimiento). Las fases se generaron con ChatGPT a partir de su retrato y cada una fue medida por el propio motor de PHENOTYPE. Una de las siete es una foto real; las otras seis son simulaciones con IA de la misma persona.</p>
+      <script type="application/json" data-evo-notes>[{"kind":"Simulación con IA","text":"El tejido blando manda: la papada borra el ángulo de la mandíbula y alarga el tercio inferior (44 %), la piel tiene acné activo y bajo los ojos hay edema. Canthal tilt plano."},{"kind":"Simulación con IA","text":"Mejillas llenas y contorno mandibular difuso; la mirada se lee cansada. Las proporciones del tercio medio ya son correctas (midface 1.00), pero quedan tapadas."},{"kind":"Simulación con IA","text":"La media de la calle: contorno inferior blando, piel apagada y pelo sin forma. Pómulos y mandíbula empiezan a insinuarse."},{"kind":"Foto real","text":"Magro y cuidado: pómulos y mandíbula definidos, piel limpia y buena densidad de pelo. Lo que frena es la zona ocular, algo cansada, y la nariz."},{"kind":"Simulación con IA","text":"Mandíbula ancha y marcada, mentón proyectado, mejillas hundidas y nariz recta y fina. La zona ocular es normal: lo único que no destaca."},{"kind":"Simulación con IA","text":"Hunter eyes (canthal tilt +4.6°, sin párpado a la vista), pómulos altos y cara compacta (FWHR 1.84). Dimorfismo extremo en mandíbula, mentón y cejas."},{"kind":"Simulación con IA","text":"Todos los rasgos en su ideal a la vez: ojos, nariz, mandíbula, labios y piel. El motor lo mide como al Chad, 7.5: por encima de ahí ya no distingue. Es el techo de la escala."}]</script>
+    </section>
+
+    <section class="sec" id="subir" aria-labelledby="t-subir">
+      <div class="sec__head"><h2 class="h2" id="t-subir">04 · Cómo se sube de tier</h2><p class="label">Tres palancas</p></div>
+      <div class="levers">
+        <article class="lever"><span class="label acc">Pulido · softmaxxing</span><h3>Hábitos</h3><p class="lever__lede">Cambia piel, grasa, pelo y cejas. Con tiempo.</p><ul class="lever__list"><li><b>Grasa al 10–12 %</b><span>Déficit de 300–500 kcal, 1.8 g/kg de proteína y 8–10k pasos: revela mandíbula y pómulos.</span></li><li><b>Rutina dermatológica</b><span>SPF diario y retinoide bajo prescripción.</span></li><li><b>Dormir 7.5–9 h</b><span>Menos edema periorbital y mejor piel.</span></li><li><b>Cejas perfiladas</b><span>Sin adelgazarlas: limpian el marco ocular.</span></li><li><b>Corte según tu cara</b><span>Laterales cortos, volumen arriba.</span></li></ul></article>
+        <article class="lever"><span class="label acc">Luz · fraudmaxxing</span><h3>Percepción</h3><p class="lever__lede">Cambia cómo se te ve, no lo que eres.</p><ul class="lever__list"><li><b>Luz y ángulo</b><span>Luz lateral a 45°, cámara a la altura de los ojos, 85 mm.</span></li><li><b>Barba de contorno</b><span>Barba corta en el borde mandibular: simula anchura bigonial.</span></li><li><b>Corrector y contouring</b><span>Ojeras neutralizadas, sombra bajo el pómulo.</span></li><li><b>Ropa y estilo</b><span>Prendas a medida y colores que contrastan con tu piel.</span></li><li><b>Alzas de 5 cm</b><span>Plantillas internas: +5 cm de altura percibida.</span></li></ul></article>
+        <article class="lever"><span class="label acc">Cincel · hardmaxxing</span><h3>Rasgos</h3><p class="lever__lede">Cambia hueso y cartílago. Solo con cirugía.</p><ul class="lever__list"><li><b>Implantes mandibulares</b><span>PEEK a medida: anchura bigonial y ángulo más marcado.</span></li><li><b>Genioplastia de avance</b><span>Proyecta el mentón y define el tercio inferior.</span></li><li><b>Cantoplastia lateral</b><span>Vector cantal positivo. Riesgo alto: solo con cirujano oculoplástico.</span></li><li><b>Rinoseptoplastia</b><span>Eje centrado, punta fina, base alar estrecha.</span></li><li><b>Implantes malares</b><span>Pómulos más proyectados y un tercio medio más compacto.</span></li></ul></article>
+      </div>
+      <p class="disclaimer">PHENOTYPE no recomienda operarse. Enseña qué cambiaría cada intervención para que entiendas tu techo. Cualquier cirugía se valora con un cirujano colegiado. Nunca bonesmashing, hormonas sin receta ni atajos peligrosos.</p>
+    </section>
+
+    <section class="sec" id="glosario" aria-labelledby="t-glosario">
+      <div class="sec__head"><h2 class="h2" id="t-glosario">05 · Glosario</h2><p class="label">La jerga, traducida</p></div>
+      <dl class="gloss"><div><dt>PSL</dt><dd>Escala de atractivo facial de 1 a 8 nacida en foros de lookism. 4 es la media.</dd></div><div><dt>SMV</dt><dd>Sexual market value: tu valor en el mercado de citas sumando cara, altura, cuerpo, estatus y soltura social.</dd></div><div><dt>LTN · MTN · HTN</dt><dd>Low, mid y high tier normie: de la media baja a la alta. En mujeres, LTB, MTB y HTB (becky).</dd></div><div><dt>Chadlite · Chad</dt><dd>Los tiers altos en hombres: top 7 % y top 1 %. En mujeres, Stacylite y Stacy.</dd></div><div><dt>True Adam · True Eve</dt><dd>El canon teórico: todos los rasgos en su ideal. El techo de la escala.</dd></div><div><dt>Canthal tilt</dt><dd>El eje del canto interno al externo del ojo. Si el externo queda más alto, la mirada lee alerta. Ideal +4° a +8°.</dd></div><div><dt>FWHR</dt><dd>Anchura entre pómulos dividida por la altura de la glabela al labio. El marcador de dimorfismo más estudiado. Ideal 1.85 a 2.05.</dd></div><div><dt>Midface ratio</dt><dd>Distancia entre pupilas dividida por la altura de pupila a labio. Un tercio medio compacto lee más atractivo. Ideal 0.95 a 1.05.</dd></div><div><dt>Anchura bigonial</dt><dd>La mandíbula frente a los pómulos: cuanto más ancha y marcada, más fuerte el tercio inferior. Ideal 0.86 a 0.94.</dd></div><div><dt>Tercios faciales</dt><dd>Frente, tercio medio e inferior. Equilibrados, la cara lee armónica.</dd></div><div><dt>Failo</dt><dd>El rasgo que más resta: el que frena la nota aunque el resto esté bien.</dd></div><div><dt>Halo</dt><dd>Un rasgo tan bueno que arrastra hacia arriba la lectura de toda la cara.</dd></div><div><dt>Softmaxxing</dt><dd>Subir sin cirugía: grasa, piel, pelo, cejas, sueño.</dd></div><div><dt>Hardmaxxing</dt><dd>Subir con cirugía: hueso y cartílago.</dd></div><div><dt>Fraudmaxxing</dt><dd>Subir la percepción sin cambiar la cara: luz, ángulo, barba, alzas, estilo.</dd></div><div><dt>Hunter eyes</dt><dd>Ojos almendrados con canthal tilt positivo y poco párpado visible.</dd></div></dl>
+    </section>
+
+    <section class="sec" id="precision" aria-labelledby="t-precision">
+      <div class="sec__head"><h2 class="h2" id="t-precision">06 · Precisión y sesgos</h2><p class="label">Lo que sabe y lo que no</p></div>
+      <ul class="stats">
+        <li><b>r 0.73</b><span>acuerdo con la nota media de la gente en hombres (validación cruzada, MEBeauty)</span></li>
+        <li><b>r 0.77</b><span>el mismo acuerdo en el modelo de mujeres</span></li>
+        <li><b>470</b><span>valoraciones por tier hechas a mano para calibrar la escala PSL</span></li>
+        <li><b>7.5</b><span>techo de medición: por encima el motor ya no distingue caras</span></li>
+      </ul>
+      <div class="cols">
+        <div><h3 class="h3">Qué la mueve</h3><p>La luz dura, el ángulo de la cámara, la distancia (un selfie con el brazo estirado ensancha la nariz y estrecha la cara), la expresión y la resolución. El escáner corrige giro y sonrisa, pero una foto mala sigue puntuando peor que una buena.</p></div>
+        <div><h3 class="h3">Sesgos conocidos</h3><p>Las valoraciones humanas con las que aprende tienen los sesgos de quien las hizo: edad, tono de piel y estándares culturales. Funciona mejor con adultos de 18 a 45 años y fotos frontales. Es una estimación recreativa, no una verdad sobre nadie.</p></div>
+        <div><h3 class="h3">Las medidas</h3><p>Son medidas 2D sobre una foto frontal: buenas para comparar, no para diagnosticar. El ángulo gonial real necesita perfil o TAC.</p></div>
+      </div>
+    </section>
+
+    <section class="sec" id="privacidad" aria-labelledby="t-priv">
+      <div class="sec__head"><h2 class="h2" id="t-priv">07 · Privacidad</h2><p class="label">Tu foto no sale de tu dispositivo</p></div>
+      <ul class="facts facts--wide">
+        <li>Dónde se analiza <b>en tu navegador (WebAssembly + WebGL)</b></li>
+        <li>Se sube la foto a un servidor <b>no, nunca</b></li>
+        <li>Qué se descarga <b>los modelos (~90 MB, una vez; quedan en caché)</b></li>
+        <li>Qué se guarda <b>tus respuestas opcionales y preferencias, solo en este navegador</b></li>
+        <li>Cómo borrarlo <b>botón «Borrar mis datos» junto a Medir</b></li>
+        <li>Edad mínima <b>18 años</b></li>
+      </ul>
+      <p class="disclaimer">Mide solo tu cara o la de quien te haya dado permiso. Para compartir un resultado sin enseñar la cara, usa el modo Cara: difuminada, pixelada u oculta.</p>
+    </section>
+
+    <section class="sec" id="faq" aria-labelledby="t-faq">
+      <div class="sec__head"><h2 class="h2" id="t-faq">08 · Preguntas</h2></div>
+      <div class="faq">
+        <details><summary>¿Qué foto tengo que subir?</summary><p>Frontal, a la altura de los ojos, luz difusa, expresión neutra, sin gafas ni gorra. Un selfie con el brazo estirado deforma la nariz y estrecha la cara: si puedes, que te la hagan a 1,5 m con zoom 2×.</p></details>
+        <details><summary>¿Por qué mi nota cambia entre dos fotos?</summary><p>Porque la luz, el ángulo y la distancia cambian lo que ve el modelo, igual que cambian lo que ve una persona. Mide varias fotos buenas y quédate con la mediana. Si sale «medida dudosa», repite con otra foto.</p></details>
+        <details><summary>¿Cómo comparo con un amigo o hago un ranking?</summary><p>Modo Versus para dos caras (dos fotos o una foto con las dos) y modo Lote para tres o más. Las fotos que subas se van sumando, y puedes cambiar de modo sin perderlas.</p></details>
+        <details><summary>¿Cómo lo comparto en stories o en X?</summary><p>En el resultado elige Story 9:16 o X 16:9 y pulsa Compartir. En el móvil se abre el menú de compartir; en el ordenador se descarga la imagen. La tarjeta deja libre la zona que tapan los botones de Instagram.</p></details>
+        <details><summary>¿Las fotos de la evolución son reales?</summary><p>Una de las siete es una foto real del autor, con su consentimiento. Las otras seis son simulaciones con IA de la misma persona. El motor midió cada una por separado, como mide cualquier foto.</p></details>
+        <details><summary>¿Por qué Chad y True Adam tienen el mismo PSL?</summary><p>Porque 7.5 es el techo del motor: por encima ya no distingue. El True Adam es un ideal teórico, no un tier alcanzable.</p></details>
+        <details><summary>¿Me recomiendas operarme?</summary><p>No. Enseñamos qué cambiaría cada intervención para que entiendas tu techo. Cualquier cirugía se valora con un cirujano colegiado.</p></details>
+      </div>
+    </section>
+
+    <section class="sec how-cta" aria-labelledby="t-cta">
+      <h2 class="display" id="t-cta">¿Cuánto puntúa <em>tu cara?</em></h2>
+      <p><a class="btn btn--go" href="./#analizar">Medir mi cara</a></p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>PHENOTYPE · uso recreativo, solo +18. No es consejo médico. Estimación con modelos de IA; no mide tu valor como persona.</span>
+    <span><a href="./">Volver al escáner</a></span>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<script>
+/* Motion policy: always animated. The visitor's own choice (the reduce-motion button, or ?motion=reduced|full)
+   decides; the operating system's reduced-motion setting does not. Every matchMedia query about
+   prefers-reduced-motion (gsap.matchMedia and Lenis included) gets that choice, and <html data-motion> carries it
+   for CSS. The button's label says what a press will do (no aria-pressed on top of it), and a keyboard press
+   gets focus back on the button after the reload. */
+(function () {
+  var KEY = 'motion', choice = null;
+  try {
+    var q = new URLSearchParams(location.search).get('motion');
+    if (q === 'reduced' || q === 'full') localStorage.setItem(KEY, q);
+    choice = localStorage.getItem(KEY) || q;
+  } catch (e) { choice = new URLSearchParams(location.search).get('motion'); }
+  var reduced = choice === 'reduced';
+  var root = document.documentElement;
+  root.setAttribute('data-motion', reduced ? 'reduced' : 'full');
+  var native = window.matchMedia && window.matchMedia.bind(window);
+  if (native) {
+    var RX = /\(\s*prefers-reduced-motion\s*(?::\s*(reduce|no-preference)\s*)?\)/g;
+    var ONLY = /^\s*\(\s*prefers-reduced-motion\s*(?::\s*(reduce|no-preference)\s*)?\)\s*$/;
+    var holds = function (value) { return ((value || 'reduce') === 'reduce') === reduced; };
+    window.matchMedia = function (query) {
+      query = String(query);
+      if (query.indexOf('prefers-reduced-motion') === -1) return native(query);
+      var only = ONLY.exec(query);
+      if (only) return native(holds(only[1]) ? 'all' : 'not all');
+      return native(query.replace(RX, function (_, value) {
+        return holds(value) ? '(min-width: 0px)' : '(max-width: 0px)';
+      }));
+    };
+  }
+  function label(b) {
+    var t = reduced ? b.getAttribute('data-label-reduced') : b.getAttribute('data-label-full');
+    if (t) (b.querySelector('[data-motion-label]') || b).textContent = t;
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    var toggles = document.querySelectorAll('[data-motion-toggle]');
+    Array.prototype.forEach.call(toggles, label);
+    try {
+      var i = sessionStorage.getItem('motion-focus');
+      if (i !== null) { sessionStorage.removeItem('motion-focus'); if (toggles[+i]) toggles[+i].focus({ preventScroll: true }); }
+    } catch (e) {}
+  });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-motion-toggle]');
+    if (!b) return;
+    var next = reduced ? 'full' : 'reduced';
+    var url = new URL(location.href);
+    try { localStorage.setItem(KEY, next); url.searchParams.delete('motion'); }
+    catch (err) { url.searchParams.set('motion', next); }
+    try {
+      if (e.detail === 0) sessionStorage.setItem('motion-focus', String(Array.prototype.indexOf.call(document.querySelectorAll('[data-motion-toggle]'), b)));
+    } catch (err) {}
+    location.replace(url.href);
+  });
+})();
+</script>

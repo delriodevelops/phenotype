@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "name": "PHENOTYPE",
+  "slug": "phenotype",
+  "lang": "es",
+  "archetype": "A2",
+  "theme": "sala",
+  "tier": "T3",
+  "artifact": false,
+  "modules": [
+    "preloader",
+    "reveal",
+    "scroll-fx",
+    "marquee",
+    "hover-media",
+    "cursor",
+    "gl"
+  ],
+  "createdAt": "2026-11-20T12:05:13Z",
+  "budgets": {
+    "maxCls": 0.1,
+    "minFps": 50,
+    "maxErrors": 0,
+    "maxLcpMs": 4000,
+    "maxTotalKB": 2048
+  }
+}

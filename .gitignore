@@ -1,0 +1,22 @@
+# dependencies and tool caches
+node_modules/
+.wrangler/
+.claude/
+
+# local secrets (wrangler reads CLOUDFLARE_ACCOUNT_ID from .env)
+.env
+.env.*
+!.env.example
+
+# private material, never published
+_private/
+phenotype/
+case-analysis.json
+
+# MEBeauty: the images are not ours to redistribute; the extracted features are too large
+tools/calibration/img/
+tools/calibration/data/features*.jsonl
+
+# QA captures
+public/.review/
+.review/

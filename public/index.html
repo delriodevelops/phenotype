@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+/* Motion policy: always animated. The visitor's own choice (the reduce-motion button, or ?motion=reduced|full)
+   decides; the operating system's reduced-motion setting does not. Every matchMedia query about
+   prefers-reduced-motion (gsap.matchMedia and Lenis included) gets that choice, and <html data-motion> carries it
+   for CSS. The button's label says what a press will do (no aria-pressed on top of it), and a keyboard press
+   gets focus back on the button after the reload. */
+(function () {
+  var KEY = 'motion', choice = null;
+  try {
+    var q = new URLSearchParams(location.search).get('motion');
+    if (q === 'reduced' || q === 'full') localStorage.setItem(KEY, q);
+    choice = localStorage.getItem(KEY) || q;
+  } catch (e) { choice = new URLSearchParams(location.search).get('motion'); }
+  var reduced = choice === 'reduced';
+  var root = document.documentElement;
+  root.setAttribute('data-motion', reduced ? 'reduced' : 'full');
+  var native = window.matchMedia && window.matchMedia.bind(window);
+  if (native) {
+    var RX = /\(\s*prefers-reduced-motion\s*(?::\s*(reduce|no-preference)\s*)?\)/g;
+    var ONLY = /^\s*\(\s*prefers-reduced-motion\s*(?::\s*(reduce|no-preference)\s*)?\)\s*$/;
+    var holds = function (value) { return ((value || 'reduce') === 'reduce') === reduced; };
+    window.matchMedia = function (query) {
+      query = String(query);
+      if (query.indexOf('prefers-reduced-motion') === -1) return native(query);
+      var only = ONLY.exec(query);
+      if (only) return native(holds(only[1]) ? 'all' : 'not all');
+      return native(query.replace(RX, function (_, value) {
+        return holds(value) ? '(min-width: 0px)' : '(max-width: 0px)';
+      }));
+    };
+  }
+  function label(b) {
+    var t = reduced ? b.getAttribute('data-label-reduced') : b.getAttribute('data-label-full');
+    if (t) (b.querySelector('[data-motion-label]') || b).textContent = t;
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    var toggles = document.querySelectorAll('[data-motion-toggle]');
+    Array.prototype.forEach.call(toggles, label);
+    try {
+      var i = sessionStorage.getItem('motion-focus');
+      if (i !== null) { sessionStorage.removeItem('motion-focus'); if (toggles[+i]) toggles[+i].focus({ preventScroll: true }); }
+    } catch (e) {}
+  });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-motion-toggle]');
+    if (!b) return;
+    var next = reduced ? 'full' : 'reduced';
+    var url = new URL(location.href);
+    try { localStorage.setItem(KEY, next); url.searchParams.delete('motion'); }
+    catch (err) { url.searchParams.set('motion', next); }
+    try {
+      if (e.detail === 0) sessionStorage.setItem('motion-focus', String(Array.prototype.indexOf.call(document.querySelectorAll('[data-motion-toggle]'), b)));
+    } catch (err) {}
+    location.replace(url.href);
+  });
+})();
+</script>
+  <title>PHENOTYPE — ¿Cuánto puntúa tu cara?</title>
+  <meta name="description" content="Sube una foto: tu cara se convierte en puntos, el motor la mide y te da tu tier en la escala PSL (Sub-5 → True Adam). Tarjeta y vídeo para compartir, versus y tier list. Todo se calcula en tu navegador: la foto no sale de tu dispositivo.">
+  <meta name="theme-color" content="#05070a">
+  <meta property="og:title" content="PHENOTYPE — ¿Cuánto puntúa tu cara?">
+  <meta property="og:description" content="Tu cara, hecha puntos y medida en la escala PSL. Gratis, en tu navegador, sin subir la foto.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2305070a'/%3E%3Cpath d='M6 6h6M6 6v6M26 26h-6M26 26v-6' stroke='%23c6ff3d' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23d7dde5'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;700;900&display=swap">
+  <link rel="stylesheet" href="css/ui.css">
+  <script type="module" src="js/app/app.js"></script>
+</head>
+<body>
+  <header class="hud">
+    <a class="hud__brand" href="./"><strong>PHENOTYPE</strong><span>ESCÁNER FACIAL · PSL 1–8</span></a>
+    <nav class="hud__nav" aria-label="Principal">
+      <a class="btn btn--sm btn--quiet" href="como-funciona.html">Cómo funciona</a>
+      <button type="button" class="btn btn--sm btn--quiet" data-motion-toggle data-label-full="Calma" data-label-reduced="Animar" title="Activar o quitar las animaciones"><span data-motion-label>Calma</span></button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- The instrument. One specimen window (a canvas: the face as points, then the reveal, then the card itself)
+         and a console beside it. data-state: idle · ready · scan · result (js/app/app.js). -->
+    <div class="lab" id="analizar" data-lab data-state="idle">
+      <div class="view" data-view>
+        <div class="view__frame">
+          <canvas class="view__canvas" data-stage width="1080" height="1920" role="img" aria-label="El espécimen: una cara hecha de puntos"></canvas>
+          <label class="view__drop" data-drop><input type="file" accept="image/jpeg,image/png,image/webp" data-file class="sr-only" multiple><span class="sr-only">Subir una foto</span></label>
+          <div class="view__hud" aria-hidden="true">
+            <span class="view__c view__c--tl" data-hud-tl>CASO 001 · DEMOSTRACIÓN</span>
+            <span class="view__c view__c--tr" data-hud-tr>EN ESPERA</span>
+            <span class="view__c view__c--bl" data-hud-bl>[ 01 / 04 ] SIN ESPÉCIMEN</span>
+            <span class="view__c view__c--br" data-hud-br></span>
+            <p class="view__tier" data-hud-tier hidden><b data-hud-name></b><span>PSL <i data-hud-psl></i></span></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="console">
+        <section class="capture" data-step="capture" aria-labelledby="t-cap">
+          <div class="capture__head">
+            <p class="label">Escáner facial · <b>se mide en tu navegador</b></p>
+            <h1 class="display" id="t-cap">¿Cuánto puntúa <em>tu cara?</em></h1>
+            <p class="lede">Sube una foto. Tu cara se convierte en puntos, el motor la mide y los mismos puntos forman tu nota: tu tier en la escala PSL, con tarjeta y vídeo listos para compartir.</p>
+          </div>
+
+          <form class="capture__form" data-quiz novalidate>
+            <div class="capture__modes">
+              <div class="seg" role="tablist" aria-label="Modo"><button type="button" role="tab" data-mode="one" aria-selected="true">Individual</button><button type="button" role="tab" data-mode="vs" aria-selected="false">Versus</button><button type="button" role="tab" data-mode="bulk" aria-selected="false">Tier list</button></div>
+              <span class="label" data-mode-hint>1 cara → tu tarjeta</span>
+            </div>
+
+            <div class="capture__act">
+              <button type="button" class="btn btn--go" data-pick-file><span data-pick-label>Subir foto</span></button>
+              <button type="button" class="btn" data-demo>Ver demo</button>
+            </div>
+
+            <div class="picker" data-picker hidden aria-label="Caras encontradas"></div>
+            <p class="note" data-note aria-live="polite">De frente, con buena luz y sin gafas de sol.</p>
+
+            <div class="capture__more">
+              <details class="more">
+                <summary>Datos opcionales · afinan tu SMV</summary>
+                <div class="more__body">
+                  <fieldset class="field"><legend>Sexo (se detecta solo)</legend>
+                    <span class="toggle"><label><input type="radio" name="sex" value="m" checked><span>Hombre</span></label><label><input type="radio" name="sex" value="f"><span>Mujer</span></label></span>
+                  </fieldset>
+                  <label class="field"><span>Edad</span><input type="number" name="age" min="18" max="80" placeholder="25" inputmode="numeric"></label>
+                  <label class="field"><span>Altura (cm)</span><input type="number" name="height_cm" min="130" max="230" placeholder="176" inputmode="numeric" data-height></label>
+                  <label class="field"><span>Grasa corporal</span><select name="bodyfat" data-bodyfat><option value="">15–19 % (supuesto)</option><option value="<10">menos del 10 %</option><option value="10-14">10–14 %</option><option value="15-19">15–19 %</option><option value="20-24">20–24 %</option><option value="25-29">25–29 %</option><option value="30+">30 % o más</option></select></label>
+                  <label class="field"><span>Entreno</span><select name="training"><option value="">1–2 días (supuesto)</option><option value="0">nada</option><option value="2">1–2 días por semana</option><option value="4">3–4 días por semana</option><option value="6">5 días o más</option></select></label>
+                  <label class="field"><span>Piel</span><select name="skin"><option value="">normal (supuesto)</option><option value="limpia">limpia</option><option value="leve">marcas o acné leve</option><option value="moderada">acné moderado</option><option value="severa">acné severo o cicatrices</option></select></label>
+                  <label class="field"><span>Pelo</span><select name="hair" data-hair><option value="">normal (supuesto)</option></select></label>
+                  <label class="field"><span>Estatus</span><select name="status"><option value="">empleado, hasta 30.000 € (supuesto)</option><option value="<15k|estudiante">estudiante</option><option value="<15k|sin-empleo">sin empleo</option><option value="15-30k|empleado">empleado, hasta 30.000 €</option><option value="30-50k|cualificado">profesional, 30–50.000 €</option><option value="50-100k|cualificado">profesional, 50–100.000 €</option><option value="100k+|directivo">directivo o empresario, más de 100.000 €</option></select></label>
+                  <label class="field"><span>Soltura social</span><select name="social"><option value="">normal (supuesto)</option><option value="1">muy reservado</option><option value="2">reservado</option><option value="3">normal</option><option value="4">sociable</option><option value="5">muy sociable</option></select></label>
+                  <input type="hidden" name="sleep" value="7"><input type="hidden" name="style" value="3"><input type="hidden" name="surgery" value="quizas">
+                  <p class="more__foot">Se guardan solo en este navegador. <button type="button" class="tlink" data-forget>Borrar mis datos</button></p>
+                </div>
+              </details>
+              <label class="consent"><input type="checkbox" name="consent" required><span>Soy mayor de edad y acepto que la foto se analiza en este navegador y no se guarda.</span></label>
+              <div class="go"><button class="btn btn--go" type="submit" data-go>Medir</button><button type="button" class="btn btn--quiet" data-pick-file><span data-pick-label>Otra foto</span></button></div>
+            </div>
+
+            <ul class="facts">
+              <li>Tu foto <b>no sale de tu dispositivo</b></li>
+              <li>Precio <b>gratis, sin registro</b></li>
+              <li>Primera vez <b>descarga ~90 MB de modelos</b></li>
+            </ul>
+          </form>
+        </section>
+
+        <!-- the result: rendered by js/app/report.js and views.js -->
+        <section class="result" data-step="result" aria-label="Tu resultado" hidden></section>
+      </div>
+    </div>
+
+    <section class="sec" aria-labelledby="t-scale">
+      <div class="sec__head"><h2 class="h2" id="t-scale">La escala</h2><p class="label">PSL 1–8 · siete tiers · percentil</p></div>
+      <ol class="tiers">
+        <li><b>Sub-5</b><span>&lt; 3.5 · P0–20</span></li>
+        <li><b>LTN</b><span>3.5–4.25 · P20–50</span></li>
+        <li><b>MTN</b><span>4.25–5 · P50–75</span></li>
+        <li><b>HTN</b><span>5–5.75 · P75–93</span></li>
+        <li><b>Chadlite</b><span>5.75–6.5 · P93–99</span></li>
+        <li><b>Chad</b><span>6.5–7.5 · P99+</span></li>
+        <li><b>True Adam</b><span>≥ 7.5 · techo</span></li>
+      </ol>
+    </section>
+    <section class="sec" aria-labelledby="t-how">
+      <div class="sec__head"><h2 class="h2" id="t-how">Cómo funciona</h2><a class="btn btn--sm" href="como-funciona.html">Todo el método</a></div>
+      <ol class="steps">
+        <li><span class="label acc">01 · Detecta</span><h3>478 puntos sobre tu cara</h3><p>Pose, sonrisa y proporciones. Si hay varias caras, eliges cuáles medir: una, un versus o una tier list.</p></li>
+        <li><span class="label acc">02 · Aísla</span><h3>Quita fondo y luz</h3><p>Recorta la cara, neutraliza el fondo y la luz y corrige el giro y la expresión para que no cuenten.</p></li>
+        <li><span class="label acc">03 · Mide</span><h3>Los puntos forman tu nota</h3><p>Un modelo entrenado con miles de valoraciones humanas da tu PSL, tu tier y tu percentil.</p></li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>PHENOTYPE · uso recreativo, solo +18. Estimación con modelos de IA; no mide tu valor como persona.</span>
+    <span><a href="como-funciona.html">Método, precisión y privacidad</a></span>
+  </footer>
+</body>
+</html>
