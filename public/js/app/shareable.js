@@ -9,7 +9,8 @@ const FKEY = 'phenotype:format';
 const fmtNow = () => { try { return localStorage.getItem(FKEY) || 'story'; } catch { return 'story'; } };
 const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
-export function shareableMarkup() {
+// fullscreen: also a button that gives the canvas the whole screen (the tier list, which is looked into by clicking)
+export function shareableMarkup({ fullscreen = false } = {}) {
   const f = fmtNow(), c = currentCensor();
   return `
     <div class="tools">
@@ -19,6 +20,7 @@ export function shareableMarkup() {
         ${videoType() ? '<button type="button" class="btn" data-video>Vídeo</button>' : ''}
         <button type="button" class="btn" data-download>Descargar</button>
         <button type="button" class="btn btn--quiet" data-replay>Ver otra vez</button>
+        ${fullscreen ? '<button type="button" class="btn" data-fullscreen>Pantalla completa</button>' : ''}
       </div>
       <div class="tools__row"><span class="label">Formato</span><div class="seg" role="radiogroup" aria-label="Formato">
         <button type="button" role="radio" data-fmt="story" aria-checked="${f === 'story'}">Story 9:16</button>
@@ -51,6 +53,21 @@ export async function mountShareable(root, { stage, build, name, text, full = fa
     if (busy || b.dataset.censor === mode) return;
     mode = b.dataset.censor; saveCensor(mode); set('data-censor', mode); rebuild();
   }));
+  // The specimen window over the whole page: the canvas keeps its shape and its clicks. The page does it itself (a
+  // class on the window), so it works where a browser has no fullscreen of its own (an iPhone); where it has, the
+  // browser chrome goes too. The button in the window, Esc or the browser's own way out all leave.
+  const view = stage.canvas.closest('[data-view]');
+  const leave = () => { view.classList.remove('is-full'); document.documentElement.style.overflow = ''; if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); };
+  root.querySelector('[data-fullscreen]')?.addEventListener('click', () => {
+    if (!view.querySelector('.view__exit')) {
+      const b = Object.assign(document.createElement('button'), { type: 'button', className: 'btn btn--sm view__exit', textContent: 'Salir ×' });
+      b.addEventListener('click', leave); view.append(b);
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && view.classList.contains('is-full')) leave(); });
+      document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && view.classList.contains('is-full')) leave(); });
+    }
+    view.classList.add('is-full'); document.documentElement.style.overflow = 'hidden';
+    view.requestFullscreen?.().catch(() => {}); // without it the window still fills the page
+  });
   root.querySelector('[data-replay]').addEventListener('click', () => { if (!busy) stage.run(scene, { full: true, onTime: sync }); });
 
   const still = async () => { stage.settle(); sync(Infinity); return canvasFile(stage.canvas, `${name}-${fmt}`); };

@@ -86,10 +86,10 @@ export function renderRanking(root, list, stage) {
   root.classList.add('result--multi');
   root.innerHTML = `
     <header class="result__head">
-      <p class="label" data-at="face:${rows[0].n ?? ''}">Lote · arriba <b>${esc(tierText(rows[0]))}</b>, PSL ${one(rows[0].psl)} · pulsa una cara de la lista para abrir su análisis, o «+N» para desplegar la fila</p>
+      <p class="label" data-at="face:${rows[0].n ?? ''}">Lote · arriba <b>${esc(tierText(rows[0]))}</b>, PSL ${one(rows[0].psl)} · pulsa una cara de la lista para abrir su análisis, o «+N» para desplegar la fila; con «Pantalla completa» se ve en grande</p>
       <h2 class="result__tier">Tier list <span>${rows.length} caras</span></h2>
     </header>
-    ${shareableMarkup()}
+    ${shareableMarkup({ fullscreen: true })}
     <div class="block">
       <h3 class="h3">Cada cara, al detalle</h3>
       <ol class="people">${rows.map((r, i) => person(r, i + 1, `Cara ${r.n}`, B.get(r), { open: i === 0, top: i === 0 })).join('')}</ol>

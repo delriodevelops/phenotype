@@ -429,3 +429,11 @@ main [id] { scroll-margin-top: calc(var(--hud-h) + 12px); }
    place, so nothing moves when it arrives. */
 [data-at] { transition: opacity .45s var(--ease); }
 [data-at].is-held { opacity: 0; visibility: hidden; transition: none; }
+
+/* The specimen window over the whole page (shareable.js): the canvas as large as the screen lets it be, in its own
+   shape, so a click still lands where it is drawn. */
+.view__exit { display: none; }
+.view.is-full { position: fixed; inset: 0; z-index: 100; width: 100vw; height: 100dvh; background: var(--ink); }
+.view.is-full .view__canvas { height: auto; width: min(100vw, calc(100dvh * 9 / 16)); box-shadow: none; }
+.view.is-full .view__canvas[data-fmt="x"] { height: auto; width: min(100vw, calc(100dvh * 16 / 9)); }
+.view.is-full .view__exit { display: inline-flex; position: absolute; top: 14px; right: 14px; z-index: 2; }
