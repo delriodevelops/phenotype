@@ -112,7 +112,8 @@ async function loadCanvas(f) {
   if (!/^image\/(jpeg|png|webp)$/.test(f.type)) return null;
   const img = await createImageBitmap(f).catch(() => null);
   if (!img) return null;
-  const s = Math.min(1, 1280 / Math.max(img.width, img.height));
+  // 2048, not less: in a group photo every face is small, and shrinking the photo shrank them under the size limit
+  const s = Math.min(1, 2048 / Math.max(img.width, img.height));
   const c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
   return c;

@@ -3,16 +3,23 @@ import { probeFeatures, predictHuman, pslFromHuman, predictPsl, predictPslFemale
 import { tierFor } from './score.js';
 
 // Hard refusals: the photo cannot be measured fairly. Soft notes: measured, with a caveat.
+// The limits follow what the probes were trained on (tools/calibration/data/features*.jsonl): MEBeauty faces go down to
+// ~130 px across the cheekbones and up to a mouth gap of ~.16 of the face height, and the probe already corrects for
+// the mouth opening. Only refuse beyond that: a face under ~90 px is upscaled past what CLIP and the landmarks can
+// read, and a gap over .16 is a yawn or a shout, which moves the chin and lip points.
+export const MIN_FACE_PX = 90, MAX_MOUTH_OPEN = 0.16;
 export function checkFace(f) {
   const m = f.metrics;
-  if (m.face_px < 150) return { refuse: 'La cara sale muy pequeña o la foto tiene poca resolución.' };
+  if (m.face_px < MIN_FACE_PX) return { refuse: 'La cara sale muy pequeña o la foto tiene poca resolución.' };
   if (Math.abs(m.yaw_deg) >= 40) return { refuse: `Cabeza girada ${Math.round(Math.abs(m.yaw_deg))}° (máximo 40°).` };
   if (f.pitch < 0.22) return { refuse: 'Barbilla muy levantada.' };
   if (f.pitch > 0.62) return { refuse: 'Barbilla muy bajada.' };
-  if (f.mouthOpen > 0.08) return { refuse: 'Boca muy abierta.' };
+  if (f.mouthOpen > MAX_MOUTH_OPEN) return { refuse: 'Boca muy abierta.' };
   const notes = [];
+  if (m.face_px < 130) notes.push('cara pequeña');
   if (Math.abs(m.yaw_deg) >= 12) notes.push(`girada ${Math.round(Math.abs(m.yaw_deg))}°`);
-  if (f.mouthOpen > 0.035) notes.push('sonrisa');
+  if (f.mouthOpen > 0.08) notes.push('boca abierta');
+  else if (f.mouthOpen > 0.035) notes.push('sonrisa');
   return { refuse: '', notes };
 }
 
