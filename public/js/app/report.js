@@ -3,7 +3,7 @@
 // with advice, and every measure against its ideal.
 import { IDEALS } from './face.js';
 import { tierFor, tierLabel, tierNames, NATURAL_RECS, EXTREME_RECS } from './score.js';
-import { cardScene, tierIndex, topText } from './card.js';
+import { cardScene, tierIndex, topText, pickMeasures } from './card.js';
 import { shareableMarkup, mountShareable } from './shareable.js';
 import { measureLines } from './breakdown.js';
 
@@ -24,9 +24,6 @@ export function ladderMarkup(psl, sex) {
   const at = tierIndex(psl);
   return `<ol class="ladder">${tierNames(sex).map((t, i) => `<li${i === at ? ' class="is-you"' : i < at ? ' class="is-under"' : ''}>${esc(t)}</li>`).join('')}</ol>`;
 }
-
-// the three measures pinned to the face on the card: where each was taken (landmark) and which margin it reads in
-const PINS = [['canthal_tilt_deg', 'Canthal', 33, 'l'], ['fwhr', 'FWHR', 454, 'r'], ['jaw_ratio', 'Mandíbula', 172, 'l']];
 
 export function renderResult(root, { scores: s, metrics: m = {}, bust, stage, provisional = false, range = null, assumed = [], demo = false }) {
   const sex = s.sex;
@@ -69,7 +66,8 @@ export function renderResult(root, { scores: s, metrics: m = {}, bust, stage, pr
   root.dataset.sex = sex;
   stage.canvas.setAttribute('aria-label', `Tarjeta: ${tierText}, PSL ${one(s.psl.now)}`);
   const id = demo ? 'DEMO' : specimenId();
-  const stats = PINS.filter(([k]) => Number.isFinite(m[k])).map(([k, label, lm, side]) => ({ label, value: fmt(k, m[k]), ok: inRange(k, m[k]), lm, side }));
+  // the measures taken on the face in the reveal and pinned to it on the card: the ones that say most about this face
+  const stats = pickMeasures(bust.lm, m);
   return mountShareable(root, {
     stage, full: demo, name: `phenotype-${tierText.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     text: [`Mi cara en PHENOTYPE: ${tierText} · PSL ${one(s.psl.now)}/8`, ...measureLines(m), '¿Y tú?'].join('\n'),

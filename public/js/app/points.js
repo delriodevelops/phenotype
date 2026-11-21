@@ -7,7 +7,7 @@
 // bows out mid-flight, so a morph reads as the cloud reorganising and never as a cross-fade.
 //
 // The canvas is opaque black and is meant to be composited with 'lighter' over whatever the caller painted first.
-export const SLOTS = 4;
+export const SLOTS = 6;
 
 const VS = `#version 300 es
 precision highp float;
@@ -24,6 +24,10 @@ uniform vec4 uView;     // yaw · pitch · focal length (px) · point size (px)
 uniform vec4 uLife;     // time · drift (px) · gain · arc
 uniform vec4 uScan;     // y · half width · strength · cut: 1 = only the points above the line exist, -1 = only those under it
 uniform vec3 uTint;
+uniform vec4 uFocA;     // a focus: centre · radii (px). The part of a face being measured
+uniform vec4 uFocB;     // a second one (two faces measured at once)
+uniform vec4 uFocK;     // strength of A · of B · how far everything else steps back
+uniform vec4 uGate;     // x · half width · light left to what lies beyond it · strength: a front crossing sideways
 out vec3 vCol;
 void main() {
   float sweep = clamp(dot(aA.xy / uRes, uSweepDir.xy), 0.0, 1.0);
@@ -41,6 +45,18 @@ void main() {
   p.xy += uLife.y * vec2(sin(uLife.x * 0.9 + aS.x * 43.0), cos(uLife.x * 0.7 + aS.y * 39.0));
   vec3 col = mix(aCa.rgb, aCb.rgb, t);
   float size = uView.w * mix(aCa.w, aCb.w, t);
+  // the focus: what is being measured takes the signal colour and keeps its own light and shade; the rest steps back
+  vec2 fa = (p.xy - uFocA.xy) / max(uFocA.zw, vec2(1.0));
+  vec2 fb = (p.xy - uFocB.xy) / max(uFocB.zw, vec2(1.0));
+  float fk = clamp(max(uFocK.x * (1.0 - smoothstep(0.3, 1.0, dot(fa, fa))), uFocK.y * (1.0 - smoothstep(0.3, 1.0, dot(fb, fb)))), 0.0, 1.0);
+  col = mix(col * (1.0 - uFocK.z), uTint * (dot(col, vec3(0.45)) + 0.04), fk * 0.9);
+  size *= 1.0 + 0.25 * fk;
+  // the gate: a front that crosses the cloud sideways; what it has not reached yet waits in the dark
+  float gd = (p.x - uGate.x) / max(uGate.y, 1.0);
+  float gg = exp(-gd * gd) * uGate.w;
+  col *= mix(1.0, uGate.z, uGate.w * smoothstep(-0.3, 0.8, gd));
+  col = mix(col, uTint * (0.55 + 0.9 * aS.y), clamp(gg, 0.0, 1.0));
+  size *= 1.0 + gg * 0.6;
   // the scan plane: points light up and lift as it passes
   float sd = (p.y - uScan.x) / max(uScan.y, 1.0);
   float glow = exp(-sd * sd) * uScan.z;
@@ -87,7 +103,7 @@ export function createField(max = 150000) {
   const prog = gl.createProgram(); gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { console.warn('points program', gl.getProgramInfoLog(prog)); return null; }
   gl.useProgram(prog);
-  const U = Object.fromEntries(['uRes', 'uPivot', 'uMorph', 'uSweepDir', 'uView', 'uLife', 'uScan', 'uTint'].map((k) => [k, gl.getUniformLocation(prog, k)]));
+  const U = Object.fromEntries(['uRes', 'uPivot', 'uMorph', 'uSweepDir', 'uView', 'uLife', 'uScan', 'uTint', 'uFocA', 'uFocB', 'uFocK', 'uGate'].map((k) => [k, gl.getUniformLocation(prog, k)]));
 
   // one fixed set of random numbers per point: its delay, its size, the way it bows out
   const seeds = new Float32Array(max * 4);
@@ -120,14 +136,16 @@ export function createField(max = 150000) {
       s.n = n;
     },
     count: (slot) => slots[slot].n,
-    // one frame: the mix of formation `from` and formation `to`
+    // one frame: the mix of formation `from` and formation `to`. focus: up to two { x, y, rx, ry, k } · gate: { x, width,
+    // dim, k } · first / n: only that run of points · keep: draw over what this canvas already holds (several runs, each
+    // on its own clock, in one picture)
     draw({ w, h, from = 0, to = from, mix = 0, delay = 0.7, sweep = 0, sweepDir = [0, 1], sweepNoise = 0.18, spread = 0, arc = 0.16, time = 0, drift = 0,
-      gain = 1, size = 3.2, yaw = 0, pitch = 0, pivot = null, focal = 0, scan = null, tint = [0.776, 1, 0.239], n = 0 }) {
+      gain = 1, size = 3.2, yaw = 0, pitch = 0, pivot = null, focal = 0, scan = null, tint = [0.776, 1, 0.239], n = 0, first = 0, keep = false, focus = null, focusDim = 0, gate = null }) {
       if (!this.alive) return false;
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
       gl.viewport(0, 0, w, h);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      const A = slots[from], B = slots[to], count = n || Math.min(A.n, B.n);
+      if (!keep) gl.clear(gl.COLOR_BUFFER_BIT);
+      const A = slots[from], B = slots[to], count = Math.max(0, Math.min(n || 1e9, Math.min(A.n, B.n) - first));
       if (!count) return true;
       gl.bindBuffer(gl.ARRAY_BUFFER, A.pos); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, B.pos); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
@@ -142,7 +160,12 @@ export function createField(max = 150000) {
       gl.uniform4f(U.uLife, time, drift, gain, arc);
       if (scan) gl.uniform4f(U.uScan, scan.y, scan.width ?? 26, scan.strength ?? 1, scan.cut === true ? 1 : scan.cut || 0); else gl.uniform4f(U.uScan, -1e5, 1, 0, 0);
       gl.uniform3f(U.uTint, tint[0], tint[1], tint[2]);
-      gl.drawArrays(gl.POINTS, 0, count);
+      const fa = focus && focus[0], fb = focus && focus[1];
+      gl.uniform4f(U.uFocA, fa ? fa.x : 0, fa ? fa.y : 0, fa ? fa.rx : 1, fa ? fa.ry : 1);
+      gl.uniform4f(U.uFocB, fb ? fb.x : 0, fb ? fb.y : 0, fb ? fb.rx : 1, fb ? fb.ry : 1);
+      gl.uniform4f(U.uFocK, fa ? fa.k ?? 1 : 0, fb ? fb.k ?? 1 : 0, focus ? focusDim : 0, 0);
+      if (gate) gl.uniform4f(U.uGate, gate.x, gate.width ?? 26, gate.dim ?? 0.2, gate.k ?? 1); else gl.uniform4f(U.uGate, 0, 1, 1, 0);
+      gl.drawArrays(gl.POINTS, first, count);
       return true;
     },
   };

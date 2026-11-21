@@ -8,18 +8,10 @@
 //   run       a card scene (card.js) takes the same canvas and the same points: the number, then the face given back
 import { createField } from './points.js';
 import { PAPER, ACID, placeBust, compose } from './sample.js';
-import { SIZES, HERO, PAIR, NEUTRAL, ground, ghost, cloud, photoIn, scanLine, play } from './card.js';
+import { SIZES, NEUTRAL, wall, ground, ghost, cloud, photoIn, scanLine, play } from './card.js';
 
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 const io = (x) => x * x * (3 - 2 * x);
-// where faces sit on the 9:16 canvas: one alone, two as a split screen (a half each), three or more as a wall
-function layout(n) {
-  if (n === 1) return [{ rect: HERO }];
-  if (n === 2) return PAIR.map((rect, i) => ({ rect, x0: i ? 540 : -1e9, x1: i ? 1e9 : 540 }));
-  const cols = n <= 4 ? 2 : 3, rows = Math.ceil(n / cols), gap = 18, w = Math.min(430, (1000 - gap * (cols - 1)) / cols), h = w * 1.4;
-  const x0 = (1080 - cols * w - gap * (cols - 1)) / 2, y0 = Math.max(230, (1920 - rows * h - gap * (rows - 1)) / 2 - 60);
-  return Array.from({ length: n }, (_, i) => ({ rect: { x: x0 + (i % cols) * (w + gap), y: y0 + Math.floor(i / cols) * (h + gap), w, h } }));
-}
 
 export function createStage(canvas, view) {
   const ctx = canvas.getContext('2d');
@@ -40,7 +32,7 @@ export function createStage(canvas, view) {
     const parts = items.map((it, i) => placeBust(it.an.sample(i === items.length - 1 ? n - per * i : per), it.rect, { acid: NEUTRAL }));
     return parts.length === 1 ? parts[0] : compose(parts);
   }
-  const itemsOf = (busts) => { const list = busts.slice(0, 6), at = layout(list.length); return list.map((an, i) => ({ an, ...at[i] })); };
+  const itemsOf = (busts) => { const at = wall(busts.length); return busts.map((an, i) => ({ an, ...at[i] })); }; // where faces wait: card.js wall()
   const freeSlot = () => (cur ? 1 - cur.slot : 0);
   const span = (...groups) => { let a = 1e9, b = -1e9; for (const g of groups) for (const it of g || []) { a = Math.min(a, it.rect.y); b = Math.max(b, it.rect.y + it.rect.h); } return a > b ? [0, H] : [a, b]; };
   function finish() { // whatever is in flight ends at once

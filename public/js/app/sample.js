@@ -308,6 +308,43 @@ export function compose(parts) {
   }
   return { pos, col, n: N };
 }
+// Join formations end to end: each part keeps its own run of points, so a run can be drawn on its own clock
+// (points.js draw: first, n).
+export function concat(parts) {
+  const N = parts.reduce((a, p) => a + p.n, 0), pos = new Float32Array(N * 3), col = new Float32Array(N * 4);
+  let at = 0;
+  for (const p of parts) { pos.set(p.pos.subarray(0, p.n * 3), at * 3); col.set(p.col.subarray(0, p.n * 4), at * 4); at += p.n; }
+  return { pos, col, n: N };
+}
+// Everyone, by tier: n points piled over a strip of seven equal cells (x0 → x1), as many over each cell as faces fall
+// in that tier (shares, out of their sum), smoothed into one silhouette that stands on `base` and rises h at its peak.
+// In reading order, like every formation.
+const crowdCache = new Map();
+export function crowd(n, shares, { x0, x1, base, h }, { seed = 23, tint = PAPER, signal = ACID } = {}) {
+  const key = [n, shares, x0, x1, base, h, seed].join('|');
+  if (crowdCache.has(key)) return crowdCache.get(key);
+  const S = 0.55, cells = shares.length, sum = shares.reduce((a, b) => a + b, 0), r = rng(seed * 977 + n);
+  const H = (u) => shares.reduce((a, s, i) => a + s * Math.exp(-0.5 * ((u - i - 0.5) / S) ** 2), 0);
+  let top = 0; for (let u = 0; u <= cells; u += 0.05) top = Math.max(top, H(u));
+  const xs = new Float32Array(n), ys = new Float32Array(n), idx = new Uint32Array(n);
+  for (let i = 0; i < n; i++) {
+    let q = r() * sum, c = 0; while (c < cells - 1 && q > shares[c]) q -= shares[c++];
+    let u = c + 0.5 + S * Math.sqrt(-2 * Math.log(1 - r() * 0.9999)) * Math.cos(6.2831853 * r());
+    u = u < 0 ? -u : u > cells ? 2 * cells - u : u;
+    xs[i] = x0 + (u / cells) * (x1 - x0); ys[i] = base - r() * (H(u) / top) * h; idx[i] = i;
+  }
+  idx.sort((a, b) => ys[a] - ys[b]);
+  for (let b = 0; b < BANDS; b++) idx.subarray(Math.floor((b * n) / BANDS), Math.floor(((b + 1) * n) / BANDS)).sort((a, c) => xs[a] - xs[c]);
+  const pos = new Float32Array(n * 3), col = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    const j = idx[i], k = r() < 0.03 ? signal : tint, b = 0.3 + 0.6 * r();
+    pos[i * 3] = xs[j]; pos[i * 3 + 1] = ys[j]; pos[i * 3 + 2] = (r() - 0.5) * 50;
+    col[i * 4] = k[0] * b; col[i * 4 + 1] = k[1] * b; col[i * 4 + 2] = k[2] * b; col[i * 4 + 3] = 0.5 + 0.5 * r();
+  }
+  const f = { pos, col, n };
+  crowdCache.set(key, f);
+  return f;
+}
 // split n into shares that add up to n exactly
 export function shares(n, parts) {
   const sum = parts.reduce((a, b) => a + b, 0), out = parts.map((p) => Math.floor((n * p) / sum));

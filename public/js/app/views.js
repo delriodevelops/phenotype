@@ -103,6 +103,6 @@ export function renderRanking(root, list, stage) {
     text: [`Tier list de ${rows.length} caras en PHENOTYPE`,
     `Arriba: ${tierText(rows[0])} · PSL ${one(rows[0].psl)}/8`, ...measureLines(rows[0].entry?.face?.metrics).filter((l) => l.startsWith('✓')),
       '¿En qué fila caes tú?'].join('\n'),
-    build: (f, mode) => rankScene(stage.field, f, rows.map((r) => ({ bust: r.bust.read(mode), psl: r.psl, tier: tierText(r), sex: r.sex })), id),
+    build: (f, mode) => rankScene(stage.field, f, rows.map((r) => ({ bust: r.bust.read(mode), psl: r.psl, tier: tierText(r), sex: r.sex, n: r.n })), id),
   });
 }

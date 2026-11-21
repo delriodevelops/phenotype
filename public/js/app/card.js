@@ -5,14 +5,22 @@
 // t = 1 is the still that gets shared, t = 0 → 1 over `ms` is the video, `enter` is where the first play on screen
 // starts (the stage has already turned the photo into points by then) and `again` where a short replay starts
 // (a format or censor switch: straight to the verdict).
-// The analysis is one cloud of points (points.js, sample.js): the scan line turns the photo into points, the points
-// form the PSL number, and a second scan gives the face back as the photograph it is (cut from its background, so
-// the card is the face and nothing else). What stays as points on the
-// card is what the analysis made: the number and the pour from the collar into it. Nothing is left over a face.
+// The analysis is one cloud of points (points.js, sample.js), and every reveal is made of what was measured on the
+// faces in it, so no two play alike:
+//   the card      the scan line turns the photo into points; the measures that say most about this face are taken on
+//                 it one by one, each drawn where it was taken; the points become everyone, tier by tier, and a front
+//                 crosses them up to this face's place; they form the PSL number, and a second scan gives the face back
+//   the versus    both faces as points, then trait by trait: the part of the face in play lights on both, the two
+//                 notes count and one side takes it; then the two PSL climb together and the verdict lands
+//   the tier list the faces as points, worst first, each flying to the row it earned; the best one goes last
+// A face at rest is always the photograph it is, cut from its background, with nothing over it. What stays as points
+// on a card is what the analysis made: the number and the pour from the collar into it.
 // Type, rules and the call to action are drawn over it. Without WebGL2 a scene shows a monochrome of the face where
 // the points would be, and plain type.
-import { placeBust, placeText, textSample, dust, compose, shares } from './sample.js';
+import { placeBust, placeText, textSample, dust, compose, concat, crowd, shares } from './sample.js';
 import { TIER_CUTS, tierNames } from './score.js';
+import { IDEALS } from './face.js';
+import { closeness } from './breakdown.js';
 
 export const SIZES = { story: [1080, 1920], x: [1200, 675] };
 const C = { ink: '#05070a', paper: '#d7dde5', acid: '#c6ff3d', red: '#ff3b2f', dim: 'rgba(215,221,229,.55)', faint: 'rgba(215,221,229,.3)', line: 'rgba(215,221,229,.16)' };
@@ -24,6 +32,21 @@ export const HERO = { x: 110, y: 250, w: 860, h: 1204 };
 export const PAIR = [{ x: -70, y: 215, w: 680, h: 952 }, { x: 470, y: 215, w: 680, h: 952 }]; // two faces: a split screen, a half each
 export const COLLAR = 0.86; // on a card the photo ends here (a share of the crop's height): chin in, collar out
 export const NEUTRAL = 0.06; // the share of lit points before a face has a tier
+// where n faces wait on a canvas: one alone, two as a split screen (a half each), three or more as a wall
+export function wall(n, fmt = 'story') {
+  const story = fmt === 'story', [W, H] = SIZES[fmt];
+  if (story && n === 1) return [{ rect: HERO }];
+  if (story && n === 2) return PAIR.map((rect, i) => ({ rect, x0: i ? 540 : -1e9, x1: i ? 1e9 : 540 }));
+  const gap = story ? 18 : 12, aw = story ? 1000 : 1100, ah = story ? 1500 : 540, top = story ? 230 : 96;
+  let best = { w: 0, cols: 1, rows: n };
+  for (let cols = 1; cols <= n; cols++) { // the grid that leaves the faces largest
+    const rows = Math.ceil(n / cols), w = Math.min(story ? 430 : 400, (aw - gap * (cols - 1)) / cols, (ah - gap * (rows - 1)) / rows / 1.4);
+    if (w > best.w + 0.5) best = { w, cols, rows };
+  }
+  const { w, cols, rows } = best, h = w * 1.4, x0 = (W - cols * w - gap * (cols - 1)) / 2;
+  const y0 = story ? Math.max(top, (H - rows * h - gap * (rows - 1)) / 2 - 60) : top + (ah - rows * h - gap * (rows - 1)) / 2;
+  return Array.from({ length: n }, (_, i) => ({ rect: { x: x0 + (i % cols) * (w + gap), y: y0 + Math.floor(i / cols) * (h + gap), w, h } }));
+}
 const NUM_FONT = '700 Unbounded';
 // The second scan, where points give way to the photo: a clean front that follows a line. FRONT is how sharp it is;
 // frontAt(y) is the mix at which that front stands on y (the delay maths of points.js, solved for the line).
@@ -198,8 +221,8 @@ export function cloud(ctx, field, W, H, o) {
   ctx.globalCompositeOperation = 'source-over';
   return true;
 }
-// a measure pinned to the place on the face it was taken from
-function callout(ctx, from, x, label, value, ok, a) {
+// a measure pinned to the place on the face it was taken from; sub: a third line (its ideal)
+function callout(ctx, from, x, label, value, ok, a, sub = '') {
   if (a <= 0) return;
   const right = x > from.x;
   ctx.globalAlpha = a * 0.9; ctx.strokeStyle = C.faint; ctx.lineWidth = 1.5;
@@ -208,29 +231,129 @@ function callout(ctx, from, x, label, value, ok, a) {
   ctx.globalAlpha = a; ctx.textAlign = right ? 'right' : 'left';
   ctx.fillStyle = C.dim; ctx.font = font(500, 18, F.m); ctx.fillText(label, x, from.y - 14);
   ctx.fillStyle = ok ? C.acid : C.paper; ctx.font = font(500, 30, F.m); ctx.fillText(value, x, from.y + 36);
+  if (sub) { ctx.globalAlpha = a * 0.85; ctx.fillStyle = ok ? C.acid : C.dim; ctx.font = font(500, 15, F.m); ctx.fillText(sub, x, from.y + 60); }
   ctx.globalAlpha = 1; ctx.textAlign = 'left';
 }
-const at = (an, i, r) => (an.lm && an.lm[i] ? { x: r.x + an.lm[i].x * r.w, y: r.y + an.lm[i].y * r.h } : null);
+
+// ---------- a measure, drawn where it was taken ----------
+// Each measure of face.js as the lines it is made of, between the landmarks it was read from (P(i): landmark i in
+// the crop, 0–1). The first `main` lines are the measure itself; the others are what it is compared with.
+const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+const ext = (a, b, k) => [{ x: a.x - (b.x - a.x) * k, y: a.y - (b.y - a.y) * k }, { x: b.x + (b.x - a.x) * k, y: b.y + (b.y - a.y) * k }];
+const GAUGES = {
+  canthal_tilt_deg: { label: 'Canthal', main: 2, lines: (P) => [ext(P(133), P(33), 0.45), ext(P(362), P(263), 0.45), [P(133), { x: P(33).x, y: P(133).y }], [P(362), { x: P(263).x, y: P(362).y }]] },
+  fwhr: { label: 'FWHR', lines: (P) => [[{ x: P(234).x, y: P(9).y }, { x: P(454).x, y: P(9).y }, { x: P(454).x, y: P(0).y }, { x: P(234).x, y: P(0).y }, { x: P(234).x, y: P(9).y }]] },
+  esr: { label: 'ESR', lines: (P) => [[P(468), P(473)], [P(234), P(454)]] },
+  midface_ratio: { label: 'Midface', main: 2, lines: (P) => { const m = mid(P(468), P(473)); return [[P(468), P(473)], [m, { x: m.x, y: P(0).y }]]; } },
+  jaw_ratio: { label: 'Mandíbula', lines: (P) => [[P(172), P(397)], [P(234), P(454)]] },
+  chin_philtrum: { label: 'Mentón', lines: (P) => [[P(17), P(152)], [P(2), P(0)]] },
+  nose_ratio: { label: 'Nariz', lines: (P) => [[P(129), P(358)], [P(133), P(362)]] },
+  lip_ratio: { label: 'Labios', main: 3, lines: (P) => [[P(0), P(13)], [P(14), P(17)], [P(61), P(291)]] },
+  third_lower: { label: 'Tercio inf.', lines: (P) => [[P(2), P(152)], [{ x: P(172).x, y: P(2).y }, { x: P(397).x, y: P(2).y }], [{ x: P(172).x, y: P(152).y }, { x: P(397).x, y: P(152).y }]] },
+  symmetry: { label: 'Simetría', lines: (P) => [[P(10), P(152)], [P(33), P(263)], [P(61), P(291)], [P(172), P(397)]] },
+};
+function gaugeOf(lm, key) {
+  const G = GAUGES[key];
+  if (!G || !lm || !lm[473]) return null;
+  const lines = G.lines((i) => lm[i]);
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const l of lines) for (const p of l) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+  return { label: G.label, main: G.main || 1, lines, x0, y0, x1, y1, y: (y0 + y1) / 2 };
+}
+// the outline of the face, and where it stands at a height on one side: a pin sits on the edge, never on the face
+const OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
+function edge(lm, y, side, r) {
+  let lo = 1e9, hi = -1e9, a0 = 1e9, a1 = -1e9;
+  for (const i of OVAL) { a0 = Math.min(a0, lm[i].y); a1 = Math.max(a1, lm[i].y); }
+  y = clamp(y, a0 + 0.004, a1 - 0.004);
+  for (let k = 0; k < OVAL.length; k++) {
+    const a = lm[OVAL[k]], b = lm[OVAL[(k + 1) % OVAL.length]];
+    if ((a.y - y) * (b.y - y) > 0 || a.y === b.y) continue;
+    const x = a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x); lo = Math.min(lo, x); hi = Math.max(hi, x);
+  }
+  return { x: r.x + (side === 'r' ? hi : lo) * r.w, y: r.y + y * r.h };
+}
+const fmtMeasure = (k, v) => (k === 'canthal_tilt_deg' ? `${v > 0.04 ? '+' : v < -0.04 ? '−' : ''}${Math.abs(v).toFixed(1)}°` : k === 'symmetry' ? `${Math.round(v)}` : k === 'third_lower' ? `${v.toFixed(0)} %` : v.toFixed(2));
+const idealText = (k) => { const i = IDEALS[k]; return i.hi >= i.max ? `${i.lo}+` : `${i.lo}–${i.hi}${i.unit === '°' ? '°' : i.unit === '%' ? ' %' : ''}`; };
+// The measures a card shows, chosen for this face: the one closest to its ideal, the one furthest from it, then the
+// next closest; never two at the same height (their readouts would sit on each other). Top to bottom, alternating
+// margins. lm: the landmarks of the crop · m: the metrics of face.js
+export function pickMeasures(lm, m = {}, n = 3) {
+  const all = Object.keys(GAUGES).map((key) => ({ key, v: m[key], c: closeness(key, m[key]), g: gaugeOf(lm, key) })).filter((x) => x.c != null && x.g).sort((a, b) => b.c - a.c);
+  if (!all.length) return [];
+  const got = [];
+  for (const x of [all[0], all[all.length - 1], ...all.slice(1, -1)]) if (got.length < n && !got.includes(x) && got.every((o) => Math.abs(o.g.y - x.g.y) > 0.075)) got.push(x);
+  got.sort((a, b) => a.g.y - b.g.y);
+  return got.map((x, i) => ({ key: x.key, v: x.v, ok: x.v >= IDEALS[x.key].lo && x.v <= IDEALS[x.key].hi, side: i % 2 ? 'r' : 'l' }));
+}
+// the lines of a measure over a face in rect r, drawn in over p
+function gauge(ctx, g, r, p, a) {
+  if (a <= 0 || p <= 0) return;
+  ctx.save(); ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';
+  g.lines.forEach((l, k) => {
+    const q = seg(p, k * 0.14, 0.6 + k * 0.14);
+    if (q <= 0) return;
+    const pts = l.map((v) => ({ x: r.x + v.x * r.w, y: r.y + v.y * r.h })), main = k < g.main;
+    let total = 0; for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    let left = total * out(q), end = pts[0];
+    ctx.beginPath(); ctx.moveTo(end.x, end.y);
+    for (let i = 1; i < pts.length && left > 0; i++) {
+      const d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y) || 1, f = Math.min(1, left / d);
+      end = { x: lerp(pts[i - 1].x, pts[i].x, f), y: lerp(pts[i - 1].y, pts[i].y, f) }; ctx.lineTo(end.x, end.y); left -= d;
+    }
+    ctx.globalAlpha = a * 0.55; ctx.strokeStyle = C.ink; ctx.lineWidth = main ? 7 : 5; ctx.stroke(); // a dark edge: it reads over the points
+    ctx.globalAlpha = a * (main ? 1 : 0.7); ctx.strokeStyle = main ? C.acid : C.paper; ctx.lineWidth = main ? 3 : 1.5; ctx.stroke();
+    const e = main ? 4 : 2.5; ctx.fillStyle = main ? C.acid : C.paper;
+    ctx.fillRect(pts[0].x - e, pts[0].y - e, e * 2, e * 2); ctx.fillRect(end.x - e, end.y - e, e * 2, e * 2);
+  });
+  ctx.restore();
+}
+// the part of the cloud a measure is read from
+const gaugeFocus = (g, r, k) => ({ x: r.x + ((g.x0 + g.x1) / 2) * r.w, y: r.y + ((g.y0 + g.y1) / 2) * r.h, rx: Math.max(((g.x1 - g.x0) / 2) * 1.35, 0.09) * r.w, ry: Math.max(((g.y1 - g.y0) / 2) * 1.6, 0.06) * r.h, k });
+// ...and the part of a face a trait of breakdown.js speaks of
+const ZONES = { ojos: [33, 133, 362, 263, 159, 145, 386, 374], pomulos: [234, 454, 116, 345], mandibula: [172, 397, 152, 136, 365], nariz: [1, 2, 129, 358, 168], labios: [61, 291, 0, 17], simetria: [10, 152, 168], piel: [10, 152, 234, 454], masculinidad: [70, 300, 172, 397, 152] };
+function zone(lm, key, r, k) {
+  if (!lm) return { x: r.x + r.w / 2, y: r.y + r.h * 0.48, rx: r.w * 0.3, ry: r.h * 0.3, k };
+  if (key === 'pelo') return { x: r.x + lm[10].x * r.w, y: r.y + (lm[10].y - 0.07) * r.h, rx: r.w * 0.36, ry: r.h * 0.15, k };
+  if (key === 'fisico') return { x: r.x + lm[152].x * r.w, y: r.y + (lm[152].y + 0.09) * r.h, rx: r.w * 0.44, ry: r.h * 0.14, k };
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const i of ZONES[key] || ZONES.piel) { x0 = Math.min(x0, lm[i].x); x1 = Math.max(x1, lm[i].x); y0 = Math.min(y0, lm[i].y); y1 = Math.max(y1, lm[i].y); }
+  return { x: r.x + ((x0 + x1) / 2) * r.w, y: r.y + ((y0 + y1) / 2) * r.h, rx: Math.max(((x1 - x0) / 2) * 1.3, 0.07) * r.w, ry: Math.max(((y1 - y0) / 2) * 1.45, 0.05) * r.h, k };
+}
+// Everyone, by tier: of every hundred faces, how many fall in each (the scale's own bands, score.js)
+const CROWD = [20, 30, 25, 18, 6, 0.9, 0.1], EDGES = [1, ...TIER_CUTS, 8];
+// a PSL as a place along the seven equal cells of the ladder (0–1)
+const along = (psl) => { const v = clamp(psl, 1, 8); let i = 0; while (i < 6 && v >= EDGES[i + 1]) i++; return (i + (v - EDGES[i]) / (EDGES[i + 1] - EDGES[i])) / 7; };
 
 // ---------- the single card ----------
-// d: { bust (sample.js analyse), psl, tier, sex, percentile, smv?, stats: [{ label, value, ok, lm, side }], id }
-// photo → (scan) points → the number → the card, where a second scan gives the face back as the photo it is: real
-// from the hair to the chin, and from the collar down still the points that pour into the number.
+// d: { bust (sample.js analyse), psl, tier, sex, percentile, smv?, stats: pickMeasures(), id }
+// photo → (scan) points → this face's measures, taken on it → everyone by tier, and a front that stops where this
+// face falls → the number → the card, where a second scan gives the face back as the photo it is: real from the hair
+// to the chin, and from the collar down still the points that pour into the number.
 export function cardScene(field, fmt, d) {
   const [W, H] = SIZES[fmt], story = fmt === 'story', an = d.bust, N = field ? field.max : 0;
-  const num = one(d.psl), names = tierNames(d.sex), ti = tierIndex(d.psl), top = topText(d.percentile), tier = d.tier.toUpperCase();
+  const num = one(d.psl), names = tierNames(d.sex), ti = tierIndex(d.psl), tier = d.tier.toUpperCase();
   const L = story
-    ? { pad: 72, hero: HERO, bust: { x: 150, y: 168, w: 780, h: 1092 }, big: { cx: W / 2, cy: 800, h: 430, maxW: 940 }, num: { x: 72, y: 1288, h: 228 }, tierY: 1250, tierMax: 168, tierW: 936, lad: { x: 72, y: 1552, w: 936, h: 46 }, cta: { x: 72, y: 1612, w: 936, h: 58 }, headY: 118 }
-    : { pad: 44, hero: { x: 371, y: 18, w: 457, h: 640 }, bust: { x: 34, y: 18, w: 457, h: 640 }, big: { cx: W / 2, cy: 300, h: 300, maxW: 1040 }, num: { x: 540, y: 250, h: 178 }, tierY: 212, tierMax: 96, tierW: 616, lad: { x: 540, y: 484, w: 616, h: 34 }, cta: { x: 540, y: 572, w: 616, h: 52 }, headY: 46 };
+    ? { pad: 72, hero: HERO, bust: { x: 150, y: 168, w: 780, h: 1092 }, big: { cx: W / 2, cy: 800, h: 430, maxW: 940 }, num: { x: 72, y: 1288, h: 228 }, tierY: 1250, tierMax: 168, tierW: 936, lad: { x: 72, y: 1552, w: 936, h: 46 }, cta: { x: 72, y: 1612, w: 936, h: 58 }, headY: 118,
+      pop: { x0: 72, x1: 1008, base: 1200, h: 560, lad: 46 }, pin: [44, W - 44] }
+    : { pad: 44, hero: { x: 371, y: 18, w: 457, h: 640 }, bust: { x: 34, y: 18, w: 457, h: 640 }, big: { cx: W / 2, cy: 300, h: 300, maxW: 1040 }, num: { x: 540, y: 250, h: 178 }, tierY: 212, tierMax: 96, tierW: 616, lad: { x: 540, y: 484, w: 616, h: 34 }, cta: { x: 540, y: 572, w: 616, h: 52 }, headY: 46,
+      pop: { x0: 150, x1: 1050, base: 500, h: 270, lad: 30 }, pin: [200, W - 200] };
   const text = field ? textSample(num, N, NUM_FONT) : null;
   const aspect = text ? text.aspect : 2.75; // without the field the number is plain type: about this wide
   const bigH = Math.min(L.big.h, L.big.maxW / aspect), bigY = L.big.cy - bigH / 2, numW = L.num.h * aspect;
   // on the card the photo ends at the collar (COLLAR of the crop's height): under that line the face stays points
   const stopY = L.bust.y + L.bust.h * COLLAR, fadeY = L.bust.y + L.bust.h * (COLLAR - 0.07);
+  // this face's measures, each with the lines it is made of
+  const meas = (d.stats || []).map((st) => ({ ...st, g: gaugeOf(an.lm, st.key) })).filter((st) => st.g)
+    .map((st) => ({ ...st, label: st.g.label.toUpperCase(), value: fmtMeasure(st.key, st.v), sub: st.ok ? 'EN SU IDEAL' : `IDEAL ${idealText(st.key)}` }));
+  // how far the next tier is
+  const gap = ti < 6 ? TIER_CUTS[ti] - d.psl : 0;
+  const next = ti === 6 ? 'TECHO DE LA ESCALA' : gap < 0.05 ? `AL BORDE DE ${names[ti + 1].toUpperCase()}` : `A ${gap.toFixed(1)} DE ${names[ti + 1].toUpperCase()}`;
   if (field) {
     const acid = charge(d.psl), [n1, n2, n3] = shares(N, [62, 27, 11]);
     field.put(0, placeBust(an.sample(N), L.hero, { acid: NEUTRAL }));
-    field.put(1, placeText(text, { x: L.big.cx, y: bigY, h: bigH, align: 'center' }, { acid: acid + 0.05, gain: 0.82 }));
+    field.put(1, crowd(N, CROWD, L.pop));
+    field.put(2, placeText(text, { x: L.big.cx, y: bigY, h: bigH, align: 'center' }, { acid: acid + 0.05, gain: 0.82 }));
     // what stays of the face pours down into the number
     const fall = dust(n3, (i, r) => {
       const k = r() ** 0.7, x = lerp(L.bust.x + L.bust.w * (0.3 + 0.4 * r()), L.num.x + numW * r(), k) + (r() - 0.5) * 120 * Math.sin(Math.PI * k);
@@ -240,47 +363,62 @@ export function cardScene(field, fmt, d) {
     // on the card the face's points under the collar are quieter: they are what is left of it, not a second subject
     const face = turnedDown(placeBust(an.sample(n1), L.bust, { acid }), (x, y) => 1 - 0.5 * clamp((y - fadeY) / (stopY - fadeY)));
     const small = placeText(textSample(num, n2, NUM_FONT), { x: L.num.x, y: L.num.y, h: L.num.h }, { acid: acid + 0.06, gain: 0.95, size: 0.9 });
-    field.put(2, compose([face, small, fall]));
+    field.put(3, compose([face, small, fall]));
     // the same card with the face's points out down to the collar: a ragged edge, not a line
-    field.put(3, compose([lightsOut(face, (x, y, i) => y < stopY - L.bust.h * 0.03 + (noise(i) - 0.5) * L.bust.h * 0.07), small, fall]));
+    field.put(4, compose([lightsOut(face, (x, y, i) => y < stopY - L.bust.h * 0.03 + (noise(i) - 0.5) * L.bust.h * 0.07), small, fall]));
   }
   const onCard = shaped(an.cut, { sink: [COLLAR - 0.07, COLLAR] }); // the face as it stands on the card: gone under the collar
-  const T = 6.4, pivot = [L.hero.x + L.hero.w / 2, L.hero.y + L.hero.h * 0.5, 0], size = story ? 3 : 2.3;
+  // the clock, in seconds: acquire · measure · everyone · the front crosses · it stops · the number · the card · the photo
+  const MD = 0.66, tM = 0.9, tB = tM + (meas.length ? meas.length * MD + 0.12 : 0.8), tG = tB + 0.7, tH = tG + 1.3, tN = tH + 0.3, tV = tN + 0.5, tC = tV + 0.85, tS = tC + 1.05, tE = tS + 0.75, T = tE + 0.75;
+  const size = story ? 3 : 2.3, P = L.pop, popTop = P.base - P.h;
+  const pinAt = (st, r) => edge(an.lm, st.g.y, st.side, r), pinX = (st) => L.pin[st.side === 'r' ? 1 : 0];
   return {
-    W, H, ms: T * 1000, enter: 0.9 / T, again: 3.9 / T,
+    W, H, ms: T * 1000, enter: tM / T, again: tC / T,
     frame(ctx, t) {
       const s = t * T, tick = Math.floor(s * 16);
-      const p0 = seg(s, 0, 0.9), p1 = seg(s, 0.9, 1.9), p2 = seg(s, 1.9, 2.9), p3 = seg(s, 2.9, 3.9), p4 = seg(s, 3.9, 5.0), p5 = seg(s, 5.0, 5.8), p6 = seg(s, 5.5, 6.4);
+      const p0 = seg(s, 0, tM), pB = seg(s, tB, tG), pG = seg(s, tG, tH), pN = seg(s, tN, tV), p4 = seg(s, tC, tS), p5 = seg(s, tS, tE), p6 = seg(s, tS + 0.4, T - 0.1);
       ground(ctx, W, H, W / 2, story ? H * 0.42 : H * 0.5);
       const cutY = L.hero.y + L.hero.h * io(p0);
       // the photo as it came, eaten from the top by the scan line
-      photoIn(ctx, an.cut, L.hero, { top: cutY, alpha: 1 - seg(s, 0.8, 0.95) });
+      photoIn(ctx, an.cut, L.hero, { top: cutY, alpha: 1 - seg(s, tM - 0.1, tM + 0.05) });
+      // the front over everyone: where it stands, and the PSL it stands on
+      const now = 1 + (d.psl - 1) * (1 - (1 - pG) ** 3), gx = lerp(P.x0, P.x1, along(now));
+      // the measure being taken
+      const mi = s >= tM + 0.06 && s < tB && meas.length ? Math.min(meas.length - 1, Math.floor((s - tM - 0.06) / MD)) : -1;
+      const mq = mi < 0 ? 0 : clamp((s - tM - 0.06 - mi * MD) / MD), lit = seg(mq, 0, 0.18) * (1 - seg(mq, 0.82, 1));
       let drawn = false;
-      if (s < 2.9) {
-        const turn = Math.sin(Math.PI * p1);
-        if (p0 > 0) { ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, cutY); ctx.clip(); ghost(ctx, an, L.hero, (field ? 0.16 : 0.95) * (1 - turn * 0.7) * (1 - seg(p2, 0, field ? 0.4 : 1))); ctx.restore(); }
+      if (s < tB) {
+        if (p0 > 0) { ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, cutY); ctx.clip(); ghost(ctx, an, L.hero, field ? 0.16 : 0.95); ctx.restore(); }
         drawn = cloud(ctx, field, W, H, {
-          from: 0, to: 1, mix: io(p2), delay: 0.8, sweep: 0.55, sweepDir: [0, 1], spread: 70, arc: 0.2, time: s, drift: 1.2 * p1,
-          yaw: 0.2 * turn, pitch: -0.05 * turn, pivot, size, gain: 0.78,
-          scan: p0 < 1 ? { y: cutY, cut: 1, width: 34, strength: 1 } : p1 < 1 ? { y: L.hero.y + L.hero.h * (1 - p1), width: 46, strength: 0.9 } : null,
+          from: 0, time: s, drift: 1.1 * seg(s, tM, tM + 0.4), size, gain: 0.78,
+          scan: p0 < 1 ? { y: cutY, cut: 1, width: 34, strength: 1 } : null,
+          focus: mi >= 0 ? [gaugeFocus(meas[mi].g, L.hero, lit)] : null, focusDim: 0.5 * lit,
         });
         scanLine(ctx, L.hero.x, cutY, L.hero.w, p0 < 1 ? 1 : 0);
-      } else if (s < 5.0) {
-        ghost(ctx, an, L.bust, (field ? 0.16 : 0.95) * seg(p4, 0.55, 1));
+      } else if (s < tN) {
+        ghost(ctx, an, L.hero, (field ? 0.16 : 0.95) * (1 - seg(pB, 0, field ? 0.35 : 1)));
         drawn = cloud(ctx, field, W, H, {
-          from: 1, to: 2, mix: io(p4), delay: 0.7, sweep: 0.35, sweepDir: [0, -1], spread: 90, arc: 0.18, time: s, drift: 1.4 * (1 - p4) * seg(p3, 0, 0.3),
-          size, gain: 0.78 + 0.9 * Math.exp(-p3 * 7) * (1 - p4),
+          from: 0, to: 1, mix: io(pB), delay: 0.8, sweep: 0.5, sweepDir: [0, 1], spread: 80, arc: 0.2, time: s, drift: 0.9, size: size * 0.9,
+          gain: 0.66 + 0.5 * Math.exp(-(s - tH) * 8) * (s >= tH ? 1 : 0), gate: { x: gx, width: story ? 22 : 16, dim: 0.16, k: seg(pB, 0.45, 1) },
         });
+      } else if (s < tC) {
+        drawn = cloud(ctx, field, W, H, {
+          from: 1, to: 2, mix: io(pN), delay: 0.6, sweep: 0.3, sweepDir: [0, -1], spread: 90, arc: 0.18, time: s, drift: 1.2 * (1 - pN), size,
+          gain: lerp(0.66, 0.78, pN) + 0.9 * Math.exp(-(s - tV) * 7) * (s >= tV ? 1 : 0), gate: { x: gx, width: story ? 22 : 16, dim: lerp(0.16, 1, seg(pN, 0, 0.5)), k: 1 - seg(pN, 0, 0.5) },
+        });
+      } else if (s < tS) {
+        ghost(ctx, an, L.bust, (field ? 0.16 : 0.95) * seg(p4, 0.55, 1));
+        drawn = cloud(ctx, field, W, H, { from: 2, to: 3, mix: io(p4), delay: 0.7, sweep: 0.35, sweepDir: [0, -1], spread: 90, arc: 0.18, time: s, drift: 1.4 * (1 - p4) * seg(s, tV, tV + 0.3), size, gain: 0.78 });
       } else {
         // the second scan: above the line the face is the photo again, sinking into the ink at the collar
         const lineY = lerp(L.bust.y - 14, stopY, io(p5));
         photoIn(ctx, onCard, L.bust, { bottom: lineY });
         ctx.save(); ctx.beginPath(); ctx.rect(0, lineY, W, H - lineY); ctx.clip(); ghost(ctx, an, L.bust, field ? 0.16 : 0.95); ctx.restore();
-        drawn = cloud(ctx, field, W, H, { from: 2, to: 3, mix: frontAt(lineY, H), delay: FRONT, sweep: 1, sweepDir: [0, 1], sweepNoise: FRONT_NOISE, spread: 0, arc: 0, time: s, size, gain: 0.78 });
+        drawn = cloud(ctx, field, W, H, { from: 3, to: 4, mix: frontAt(lineY, H), delay: FRONT, sweep: 1, sweepDir: [0, 1], sweepNoise: FRONT_NOISE, spread: 0, arc: 0, time: s, size, gain: 0.78 });
         scanLine(ctx, L.bust.x, lineY, L.bust.w, p5 > 0 && p5 < 1 ? 1 : 0);
       }
-      if (!drawn && s >= 1.9) { // no WebGL: the number in plain type
-        ctx.fillStyle = C.paper; ctx.globalAlpha = s < 2.9 ? io(p2) : 1;
+      if (!drawn && s >= tN) { // no WebGL: the number in plain type
+        ctx.fillStyle = C.paper; ctx.globalAlpha = s < tC ? io(pN) : 1;
         const big = 1 - io(p4), nh = lerp(L.num.h, bigH, big);
         ctx.font = font(700, nh / 0.72, F.d); ctx.textAlign = big > 0.5 ? 'center' : 'left';
         ctx.fillText(num, big > 0.5 ? L.big.cx : L.num.x, lerp(L.num.y + L.num.h, bigY + bigH, big));
@@ -289,26 +427,68 @@ export function cardScene(field, fmt, d) {
       // ---- type over the cloud ----
       header(ctx, L.pad, W - L.pad, L.headY, `ESPÉCIMEN ${d.id}`, !story);
       // while it is being read: what the instrument is doing
-      const busy = seg(s, 0.15, 0.5) * (1 - seg(s, 1.75, 1.95));
+      const busy = seg(s, 0.15, 0.5) * (1 - seg(s, tB - 0.15, tB + 0.05));
       if (busy > 0) {
         ctx.globalAlpha = busy; ctx.fillStyle = C.acid; ctx.font = font(500, story ? 24 : 16, F.m);
-        tracked(ctx, p0 < 1 ? 'ADQUIRIENDO · 478 PUNTOS' : `MIDIENDO · PSL ${decode('0.0', 0, tick)}`, W / 2, story ? L.hero.y - 34 : H - 18, 2, 'center');
+        const doing = p0 < 1 ? `ADQUIRIENDO · ${Math.round(478 * io(p0))} PUNTOS` : mi >= 0 ? `MIDIENDO · ${meas[mi].label} · ${mi + 1} / ${meas.length}` : 'MIDIENDO';
+        tracked(ctx, doing, W / 2, story ? L.hero.y - 34 : H - 18, 2, 'center');
+        ctx.globalAlpha = 1;
+      }
+      // the measures, taken one by one where they are read: the lines on the points, the readout in the margin
+      if (s >= tM && s < tB + 0.3) {
+        const leave = 1 - seg(s, tB - 0.1, tB + 0.22);
+        meas.forEach((st, i) => {
+          const w0 = tM + 0.06 + i * MD, q = seg(s, w0, w0 + MD);
+          if (q <= 0) return;
+          const done = seg(q, 0.6, 0.72), rest = lerp(1, 0.3, seg(s, w0 + MD, w0 + MD + 0.25));
+          gauge(ctx, st.g, L.hero, seg(q, 0, 0.6), leave * rest);
+          callout(ctx, pinAt(st, L.hero), pinX(st), st.label, fmtMeasure(st.key, st.v * out(seg(q, 0.12, 0.6))), st.ok && done > 0.5, seg(q, 0, 0.15) * leave, done > 0.5 ? st.sub : '');
+        });
+      }
+      // everyone, by tier: the ladder under them, the front and the PSL it has reached
+      const popA = seg(pB, 0.35, 0.9) * (1 - seg(pN, 0, 0.45));
+      if (popA > 0) {
+        const at = pG > 0 ? tierIndex(now) : -1, hit = s >= tH ? Math.exp(-(s - tH) * 9) : 0;
+        if (!drawn) { // no WebGL: the silhouette of the pile, lit up to the front
+          const hgt = (u) => CROWD.reduce((a, c, i) => a + c * Math.exp(-0.5 * ((u - i - 0.5) / 0.55) ** 2), 0) / 38;
+          const pile = () => { ctx.beginPath(); ctx.moveTo(P.x0, P.base); for (let u = 0; u <= 7.001; u += 0.1) ctx.lineTo(lerp(P.x0, P.x1, u / 7), P.base - Math.min(1, hgt(u)) * P.h); ctx.lineTo(P.x1, P.base); ctx.closePath(); ctx.fill(); };
+          ctx.fillStyle = C.paper; ctx.globalAlpha = popA * 0.12; pile();
+          ctx.save(); ctx.beginPath(); ctx.rect(0, 0, gx, H); ctx.clip(); ctx.globalAlpha = popA * 0.5; pile(); ctx.restore();
+        }
+        ctx.globalAlpha = popA * 0.8; ctx.fillStyle = C.dim; ctx.font = font(500, story ? 22 : 14, F.m);
+        tracked(ctx, `DE CADA CIEN ${d.sex === 'f' ? 'MUJERES' : 'HOMBRES'} · ESCALA PSL`, W / 2, popTop - (story ? 190 : 96), 3, 'center');
+        ladder(ctx, P.x0, P.base + (story ? 22 : 12), P.x1 - P.x0, P.lad, names, at, popA);
+        const k = seg(pB, 0.6, 1) * popA;
+        if (k > 0) {
+          const g = ctx.createLinearGradient(gx - (story ? 120 : 80), 0, gx, 0); g.addColorStop(0, 'rgba(198,255,61,0)'); g.addColorStop(1, 'rgba(198,255,61,.16)');
+          ctx.globalAlpha = k; ctx.fillStyle = g; ctx.fillRect(gx - (story ? 120 : 80), popTop - 20, story ? 120 : 80, P.base - popTop + 20);
+          ctx.fillStyle = C.acid; ctx.fillRect(gx - 1.5, popTop - (story ? 50 : 30), 3, P.base - popTop + (story ? 50 : 30) + (story ? 22 : 12));
+          const px = (story ? 92 : 56) * (1 + 0.16 * hit), tx = clamp(gx, P.x0 + px * 1.1, P.x1 - px * 1.1);
+          ctx.fillStyle = hit > 0.02 || s >= tH ? C.acid : C.paper; ctx.font = font(700, px, F.d); ctx.textAlign = 'center'; ctx.fillText(one(now), tx, popTop - (story ? 76 : 44));
+          ctx.textAlign = 'left';
+        }
         ctx.globalAlpha = 1;
       }
       // the verdict: PSL over the number, the tier under it; then the tier travels to its place on the card
-      const tierP = seg(s, 2.95, 3.6), move = io(p4);
-      if (s >= 2.9) {
+      const tierP = seg(s, tV, tV + 0.6), move = io(p4);
+      if (s >= tV - 0.05) {
         const ts = fit(ctx, tier, L.tierW, L.tierMax, 900, F.d, 28), tw = ctx.measureText(tier).width;
         const x = lerp(W / 2 - tw / 2, story ? L.pad : L.num.x, move), y = lerp(bigY + bigH + ts * 0.98 + (story ? 60 : 26), L.tierY, move);
-        ctx.fillStyle = C.acid; ctx.font = font(900, ts, F.d); ctx.textAlign = 'left'; ctx.fillText(decode(tier, tierP, tick), x, y);
-        const lab = seg(s, 2.95, 3.2) * (1 - seg(p4, 0, 0.3));
-        if (lab > 0) { ctx.globalAlpha = lab; ctx.fillStyle = C.dim; ctx.font = font(500, story ? 28 : 18, F.m); tracked(ctx, `PSL · ESCALA 1–8 · ${d.id}`, W / 2, bigY - (story ? 44 : 20), 3, 'center'); ctx.globalAlpha = 1; }
+        ctx.globalAlpha = seg(s, tV - 0.05, tV + 0.05); ctx.fillStyle = C.acid; ctx.font = font(900, ts, F.d); ctx.textAlign = 'left'; ctx.fillText(decode(tier, tierP, tick), x, y);
+        const lab = seg(s, tV, tV + 0.25) * (1 - seg(p4, 0, 0.3));
+        if (lab > 0) {
+          ctx.globalAlpha = lab; ctx.fillStyle = C.dim; ctx.font = font(500, story ? 28 : 18, F.m); tracked(ctx, `PSL · ESCALA 1–8 · ${d.id}`, W / 2, bigY - (story ? 44 : 20), 3, 'center');
+          // how far the next tier is: the number is this face's, and so is what it is short of
+          ctx.globalAlpha = lab * seg(s, tV + 0.4, tV + 0.65); ctx.fillStyle = C.paper; ctx.font = font(500, story ? 26 : 17, F.m);
+          tracked(ctx, next, W / 2, bigY + bigH + ts * 0.98 + (story ? 60 : 26) + (story ? 62 : 34), 3, 'center');
+        }
+        ctx.globalAlpha = 1;
       }
       // the card's own furniture
-      const end = out(p6), endA = seg(s, 5.5, 6.1);
+      const end = out(p6), endA = seg(s, tS + 0.4, tS + 1.0);
       if (endA > 0) {
-        // beside the number: the brag
-        const rx = story ? W - L.pad : L.num.x + L.tierW, ry = L.num.y;
+        // beside the number: the brag, counting to its place
+        const rx = story ? W - L.pad : L.num.x + L.tierW, ry = L.num.y, top = topText(lerp(50, d.percentile, out(seg(s, tS + 0.4, tS + 1.2))));
         ctx.globalAlpha = endA; ctx.textAlign = 'right';
         ctx.fillStyle = C.dim; ctx.font = font(500, story ? 22 : 15, F.m); ctx.fillText('PSL · 1–8', rx, ry + (story ? 26 : 16));
         if (top) {
@@ -318,8 +498,10 @@ export function cardScene(field, fmt, d) {
         }
         if (d.smv != null && story) { ctx.fillStyle = C.dim; ctx.font = font(500, 22, F.m); ctx.fillText(`SMV ${d.smv.toFixed(0)}`, rx, ry + L.num.h + 2); }
         ctx.globalAlpha = 1; ctx.textAlign = 'left';
-        if (story) for (const st of d.stats || []) { const p = at(an, st.lm, L.bust); if (p) callout(ctx, p, st.side === 'r' ? W - 44 : 44, st.label.toUpperCase(), st.value, st.ok, endA); }
-        ladder(ctx, L.lad.x, L.lad.y + (1 - end) * 16, L.lad.w, L.lad.h, names, ti, endA);
+        // the measures taken at the start, back where they were read: on the edge of the face, never on it
+        if (story) meas.forEach((st, i) => callout(ctx, pinAt(st, L.bust), pinX(st), st.label, st.value, st.ok, seg(s, tS + 0.45 + i * 0.14, tS + 0.85 + i * 0.14), st.sub));
+        // the ladder lights up to this face's tier, a cell at a time
+        ladder(ctx, L.lad.x, L.lad.y + (1 - end) * 16, L.lad.w, L.lad.h, names, Math.min(ti, Math.floor((ti + 1) * seg(s, tS + 0.45, tS + 1.05))), endA);
         ctaBar(ctx, L.cta.x, L.cta.y + (1 - end) * 22, L.cta.w, L.cta.h, endA);
         if (story) smallPrint(ctx, W, endA);
       }
@@ -329,10 +511,11 @@ export function cardScene(field, fmt, d) {
 
 // ---------- versus ----------
 // a, b: { bust, psl, tier, best: [trait names] }; winner: 0 | 1 | null; rows: [{ label, a, b, side }], the traits that
-// separate them most with both notes (breakdown.js). The scan turns both photos into points while the numbers count
-// up, the verdict lands, and a second scan gives both faces back as photographs with nothing over them: the one that
-// won keeps a halo, the other is dimmer. Then the tale of the tape between the two numbers, and under each tier what
-// that face stands out for.
+// separate them most with both notes (breakdown.js). The scan turns both photos into points; then those traits are
+// played one by one, closest first: the part of the face in play lights on both, the two notes count and the side
+// that takes it keeps the light. Only then do the two PSL climb, the verdict lands, and a second scan gives both
+// faces back as photographs with nothing over them: the one that won keeps a halo, the other is dimmer. Then the
+// tale of the tape between the two numbers, and under each tier what that face stands out for.
 function tape(ctx, rows, cx, y, step, px, maxW, p) {
   if (p <= 0 || !rows.length) return;
   const text = rows.map((r) => [r.a.toFixed(1), r.label.toUpperCase(), r.b.toFixed(1)]);
@@ -381,14 +564,20 @@ export function versusScene(field, fmt, a, b, winner, id = '', rows = []) {
     field.put(0, plain);
     field.put(1, lightsOut(plain, () => true)); // the same two faces with every point out: what the second scan leaves
   }
-  const T = 5.6, size = story ? 2.7 : 2.3, shown = rows.slice(0, 5);
+  const size = story ? 2.7 : 2.3, shown = rows.slice(0, 5);
+  // the traits, played one by one before any total: the closest call first, the widest gap last
+  const rounds = [...shown].sort((x, y) => Math.abs(x.a - x.b) - Math.abs(y.a - y.b)), RD = 0.64, r0 = 0.8, r1 = r0 + (rounds.length ? rounds.length * RD + 0.15 : 0);
+  const T = 5.6 + r1 - r0; // the rest of the reveal runs on its own clock (u), which waits while the traits are played
   const NX = story ? [pad, W - pad] : null; // a story's two numbers stand on the outer margins: the tape goes between them
   const best = sides.map((sd) => (sd.best || []).slice(0, 2)), line = (names) => names.map((n) => n.toUpperCase()).join(' · ');
   return {
-    W, H, ms: T * 1000, enter: 0.8 / T, again: 2.2 / T,
+    W, H, ms: T * 1000, enter: 0.8 / T, again: (2.2 + r1 - r0) / T,
     frame(ctx, t) {
-      const s = t * T, tick = Math.floor(s * 16);
+      const real = t * T, s = real < r0 ? real : real < r1 ? r0 : real - (r1 - r0), tick = Math.floor(real * 16);
       const p0 = seg(s, 0, 0.8), p1 = seg(s, 0.8, 2.3), p2 = seg(s, 2.3, 3.4), p3 = seg(s, 3.4, 4.2), p4 = seg(s, 4.2, 4.8);
+      // the trait in play: which one, how far into it, and whether it has been called
+      const ri = rounds.length && real >= r0 && real < r1 ? Math.min(rounds.length - 1, Math.floor((real - r0) / RD)) : -1, round = ri < 0 ? null : rounds[ri];
+      const rq = ri < 0 ? 0 : clamp((real - r0 - ri * RD) / RD), env = seg(rq, 0, 0.15) * (1 - seg(rq, 0.88, 1)), called = seg(rq, 0.55, 0.7);
       ground(ctx, W, H, W / 2, H / 2);
       const cutY = y0 + (y1 - y0) * io(p0); // one scan line crosses both faces
       sides.forEach((sd, i) => photoIn(ctx, still[i], R[i], { top: cutY, alpha: 1 - seg(s, 0.7, 0.85), ...col(i) }));
@@ -398,8 +587,10 @@ export function versusScene(field, fmt, a, b, winner, id = '', rows = []) {
         sides.forEach((sd, i) => ghost(ctx, sd.bust, R[i], (field ? 0.15 : 0.95) * (lost(i) ? 1 - 0.5 * io(p2) : 1)));
         ctx.restore();
         cloud(ctx, field, W, H, {
-          from: 0, time: s, drift: seg(p1, 0, 0.2), size, gain: 0.8 + 0.5 * Math.exp(-seg(s, 2.3, 4.4) * 9) * (s >= 2.3 ? 1 : 0),
+          from: 0, time: real, drift: real >= r0 ? seg(real, r0, r0 + 0.3) : 0, size, gain: 0.8 + 0.5 * Math.exp(-seg(s, 2.3, 4.4) * 9) * (s >= 2.3 ? 1 : 0),
           scan: p0 < 1 ? { y: cutY, cut: 1, width: 30, strength: 1 } : null,
+          // the same part of both faces; once the trait is called, the side that took it keeps the light
+          focus: round ? sides.map((sd, i) => zone(sd.bust.lm, round.key, R[i], env * (round.side == null ? 0.8 : lerp(0.8, round.side === i ? 1 : 0.2, called)))) : null, focusDim: 0.55 * env,
         });
         scanLine(ctx, story ? pad : R[0].x, cutY, story ? W - pad * 2 : R[1].x + R[1].w - R[0].x, p0 < 1 ? 1 : 0);
       } else {
@@ -410,7 +601,7 @@ export function versusScene(field, fmt, a, b, winner, id = '', rows = []) {
         ctx.save(); ctx.beginPath(); ctx.rect(0, lineY, W, H - lineY); ctx.clip();
         sides.forEach((sd, i) => ghost(ctx, sd.bust, R[i], (field ? 0.15 : 0.95) * (lost(i) ? 0.5 : 1)));
         ctx.restore();
-        cloud(ctx, field, W, H, { from: 0, to: 1, mix: frontAt(lineY, H), delay: FRONT, sweep: 1, sweepDir: [0, 1], sweepNoise: FRONT_NOISE, spread: 0, arc: 0, time: s, size, gain: 0.8 });
+        cloud(ctx, field, W, H, { from: 0, to: 1, mix: frontAt(lineY, H), delay: FRONT, sweep: 1, sweepDir: [0, 1], sweepNoise: FRONT_NOISE, spread: 0, arc: 0, time: real, size, gain: 0.8 });
         scanLine(ctx, story ? pad : R[0].x, lineY, story ? W - pad * 2 : R[1].x + R[1].w - R[0].x, p3 > 0 && p3 < 1 ? 1 : 0);
       }
       if (story) header(ctx, pad, W - pad, 118, `VERSUS ${id}`);
@@ -423,7 +614,7 @@ export function versusScene(field, fmt, a, b, winner, id = '', rows = []) {
       const maxPsl = Math.max(a.psl, b.psl, 1.01), endA = seg(s, 4.2, 4.7), end = out(p4);
       const bpx = story ? Math.min(...best.map((names) => fit(ctx, line(names), 330, 24, 500, F.m, 12))) : 15; // both sides in one size
       sides.forEach((sd, i) => {
-        const won = winner === i, on = seg(s, 0.7, 1.0);
+        const won = winner === i, on = seg(s, 0.7, 1.0) * (rounds.length ? seg(real, r1 - 0.1, r1 + 0.2) : 1); // no total while the traits are played
         if (on <= 0) return;
         const climb = clamp((out(p1) * (maxPsl - 1)) / (sd.psl - 1 || 1)), now = 1 + (sd.psl - 1) * climb, tierP = seg(s, 0.9 + 1.4 * ((sd.psl - 1) / (maxPsl - 1)), 1.3 + 1.4 * ((sd.psl - 1) / (maxPsl - 1)));
         const settle = io(p2), name = sd.tier.toUpperCase(), dim = lost(i) ? 1 - 0.35 * settle : 1;
@@ -446,7 +637,26 @@ export function versusScene(field, fmt, a, b, winner, id = '', rows = []) {
         ctx.globalAlpha = 1; ctx.textAlign = 'left';
       });
       // the middle: VS, then the verdict slams over it
-      const cx = W / 2, vy = story ? 700 : 300, by = story ? y1 + 12 : 300, slam = seg(s, 2.45, 2.8), vs = seg(s, 0.6, 0.9) * (1 - seg(s, 2.35, 2.55));
+      const cx = W / 2, vy = story ? 700 : 300, by = story ? y1 + 12 : 300, slam = seg(s, 2.45, 2.8), vs = seg(real, 0.6, 0.9) * (1 - seg(s, 2.35, 2.55));
+      // trait by trait: its name in the middle, a note on each side counting up, and the tally of who has taken what
+      if (rounds.length && real >= r0 && real < r1 + 0.2) {
+        const ry = story ? 1404 : 404, sq = story ? 18 : 11, gapP = story ? 9 : 6, py = ry + (story ? 30 : 16);
+        const all = seg(real, r0, r0 + 0.2) * (1 - seg(real, r1 - 0.15, r1 + 0.05));
+        const took = (i) => rounds.filter((r, j) => r.side === i && (j < ri || (j === ri && called > 0.5) || ri < 0)).length;
+        ctx.globalAlpha = all * 0.5; ctx.fillStyle = C.paper; ctx.fillRect(cx - 1, py - 3, 2, sq + 6);
+        [0, 1].forEach((i) => { for (let k = 0; k < took(i); k++) { ctx.globalAlpha = all; ctx.fillStyle = C.acid; ctx.fillRect(i ? cx + 12 + k * (sq + gapP) : cx - 12 - sq - k * (sq + gapP), py, sq, sq); } });
+        if (round) {
+          const count = out(seg(rq, 0.08, 0.55)), name = round.label.toUpperCase();
+          ctx.globalAlpha = env * 0.9; ctx.fillStyle = C.dim; ctx.font = font(500, story ? 22 : 13, F.m); tracked(ctx, `RASGO ${ri + 1} / ${rounds.length}`, cx, ry - (story ? 76 : 40), 3, 'center');
+          ctx.globalAlpha = env; ctx.fillStyle = C.paper; fit(ctx, name, story ? 430 : 210, story ? 58 : 30, 900, F.d, 14); ctx.textAlign = 'center'; ctx.fillText(name, cx, ry);
+          [round.a, round.b].forEach((v, i) => {
+            ctx.globalAlpha = env * (round.side === 1 - i ? 1 - 0.55 * called : 1); ctx.fillStyle = round.side === i && called > 0.5 ? C.acid : C.paper;
+            ctx.font = font(500, story ? 104 : 58, F.m); ctx.textAlign = i ? 'right' : 'left';
+            ctx.fillText((v * count).toFixed(1), story ? NX[i] : i ? W - pad : pad, story ? ry : H - 28);
+          });
+        }
+        ctx.globalAlpha = 1; ctx.textAlign = 'left';
+      }
       if (vs > 0) { ctx.globalAlpha = vs; ctx.fillStyle = C.acid; ctx.font = font(900, story ? 120 : 84, F.d); ctx.textAlign = 'center'; ctx.fillText('VS', cx, vy + (story ? 42 : 30)); ctx.globalAlpha = 1; ctx.textAlign = 'left'; }
       if (slam > 0) {
         const bw = story ? 1180 : 470, bh = story ? 132 : 78, k = 1 + 0.5 * (1 - out(slam));
@@ -472,56 +682,121 @@ export function versusScene(field, fmt, a, b, winner, id = '', rows = []) {
 }
 
 // ---------- tier list (three faces or more) ----------
-// rows: [{ bust, psl, tier, sex }] in any order. The format everyone already knows how to read: seven rows, best on
-// top, every face in the row it earned.
+// rows: [{ bust, psl, tier, sex, n }] in any order (n: the order they were chosen in, which is how they stand on the
+// stage). The format everyone already knows how to read: seven rows, best on top, every face in the row it earned.
+// The faces wait as points, in a wall; worst first, each one flies to its row, which lights when it gets its first
+// face, and the best goes last. Then one scan down the list gives every face back as its photograph.
 const RAMP = ['#ff3b2f', '#6b727c', '#9aa3ad', '#d7dde5', '#dcf08f', '#d1f866', '#c6ff3d']; // Sub-5 → True Adam
 export function rankScene(field, fmt, rows, id = '') {
-  const [W, H] = SIZES[fmt], story = fmt === 'story', pad = story ? 72 : 44;
+  const [W, H] = SIZES[fmt], story = fmt === 'story', pad = story ? 72 : 44, n = rows.length;
   const sorted = [...rows].sort((x, y) => y.psl - x.psl), names = tierNames(sorted.every((r) => r.sex === 'f') ? 'f' : 'm');
   const groups = Array.from({ length: 7 }, () => []);
   sorted.forEach((r) => groups[tierIndex(r.psl)].push(r));
   const shown = story ? [6, 5, 4, 3, 2, 1, 0] : [6, 5, 4, 3, 2, 1, 0].filter((i) => groups[i].length);
   const top = story ? 330 : 96, bottom = story ? 1586 : H - 46, rh = Math.min(story ? 180 : 132, (bottom - top) / shown.length), lw = story ? 232 : 190;
   const th = rh - (story ? 22 : 12), tw = th * (5 / 7), step = tw + (story ? 12 : 8), per = Math.max(1, Math.floor((W - pad - (pad + lw + 16) + (story ? 12 : 8)) / step));
-  const T = 2.6;
+  const bh = rh - (story ? 10 : 6); // a row's label box
+  // every face's cell in the list; a row with more faces than fit keeps its last cell for "+N", and those faces go into it
+  const cell = new Map();
+  shown.forEach((ti, k) => groups[ti].forEach((r, j) => cell.set(r, { x: pad + lw + 16 + Math.min(j, per - 1) * step, y: top + k * rh, w: tw, h: th, ti, k, over: groups[ti].length > per && j >= per - 1 })));
+  // ...and its place in the wall it leaves
+  const seats = wall(n, fmt), seated = [...sorted].sort((a, b) => (a.n ?? 0) - (b.n ?? 0)), seat = (r) => seats[seated.indexOf(r)].rect;
+  // the clock: worst first; the best waits a beat and takes its time
+  const order = [...sorted].reverse(), gapT = clamp(2.6 / n, 0.12, 0.55), t0 = 0.55, start = new Map(), land = new Map();
+  order.forEach((r, i) => { const last = i === n - 1, a = t0 + i * gapT + (last ? 0.35 : 0); start.set(r, a); land.set(r, a + (last ? 0.95 : 0.7)); });
+  const tL = land.get(sorted[0]), tS = tL + 0.3, tE = tS + 0.8, T = tE + 0.75;
+  const litAt = groups.map((g) => (g.length ? Math.min(...g.map((r) => land.get(r))) : Infinity));
+  const N = field ? field.max : 0, pts = Math.floor(N / n), size = story ? 3 : 2.3;
+  if (field) {
+    // one run of points per face, the same run in the wall and in the list, so each flies on its own clock
+    const a = [], b = [];
+    sorted.forEach((r) => {
+      const smp = r.bust.sample(pts), from = seat(r), to = cell.get(r), k = Math.sqrt((to.w * to.h) / (from.w * from.h));
+      a.push(placeBust(smp, from, { acid: NEUTRAL }));
+      const f = placeBust(smp, to, { acid: to.over ? 0 : charge(r.psl) });
+      for (let i = 0; i < f.n; i++) { f.col[i * 4 + 3] *= k; if (to.over) f.col[i * 4] = f.col[i * 4 + 1] = f.col[i * 4 + 2] = 0; } // smaller points for a smaller face
+      b.push(f);
+    });
+    const list = concat(b);
+    field.put(0, concat(a)); field.put(1, list); field.put(2, lightsOut(list, () => true));
+  }
+  const y0 = top - 14, y1 = top + shown.length * rh + 6;
   return {
-    W, H, ms: T * 1000, enter: 0, again: 0,
+    W, H, ms: T * 1000, enter: 0, again: (tS - 0.15) / T,
     frame(ctx, t) {
-      const s = t * T;
+      const s = t * T, ps = seg(s, tS, tE), lineY = field ? lerp(y0, y1, io(ps)) : 1e9, landed = sorted.filter((r) => s >= land.get(r)).length;
       ground(ctx, W, H, W / 2, H / 2);
+      const headA = seg(s, 0.15, 0.7);
       header(ctx, pad, W - pad, story ? 118 : 50, `TIER LIST ${id}`, !story);
+      const count = s < tL ? `CLASIFICANDO · ${landed} / ${n}` : `${n} CARAS · ESCALA PSL`;
       if (!story) {
-        ctx.save(); ctx.globalAlpha = 0.07; ctx.fillStyle = C.paper; ctx.textAlign = 'right'; ctx.font = font(900, 150, F.d);
+        ctx.save(); ctx.globalAlpha = 0.07 * headA; ctx.fillStyle = C.paper; ctx.textAlign = 'right'; ctx.font = font(900, 150, F.d);
         ctx.fillText('TIER', W - pad, H / 2 - 6); ctx.fillText('LIST', W - pad, H / 2 + 132); ctx.restore();
-        ctx.fillStyle = C.acid; ctx.font = font(500, 16, F.m); tracked(ctx, `${rows.length} CARAS · ESCALA PSL`, W - pad, 78, 2, 'right');
+        ctx.globalAlpha = headA; ctx.fillStyle = C.acid; ctx.font = font(500, 16, F.m); tracked(ctx, count, W - pad, 78, 2, 'right');
+      } else {
+        ctx.globalAlpha = headA; ctx.fillStyle = C.paper; ctx.font = font(900, 92, F.d); ctx.fillText('TIER LIST', pad, 268);
+        ctx.fillStyle = C.acid; ctx.font = font(500, 26, F.m); tracked(ctx, count, W - pad, 262, 2, 'right');
       }
-      if (story) {
-        ctx.fillStyle = C.paper; ctx.font = font(900, 92, F.d); ctx.fillText('TIER LIST', pad, 268);
-        ctx.fillStyle = C.acid; ctx.font = font(500, 26, F.m); tracked(ctx, `${rows.length} CARAS · ESCALA PSL`, W - pad, 262, 2, 'right');
-      }
-      shown.forEach((ti, k) => {
-        const a = seg(s, 0.1 + k * 0.12, 0.5 + k * 0.12); if (a <= 0) return;
-        const y = top + k * rh + (1 - out(a)) * 26, g = groups[ti];
-        ctx.globalAlpha = a * (g.length ? 1 : 0.34);
-        ctx.fillStyle = g.length ? RAMP[ti] : 'rgba(215,221,229,.1)'; ctx.fillRect(pad, y, lw, rh - (story ? 10 : 6));
-        ctx.fillStyle = g.length ? C.ink : C.paper; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        fit(ctx, names[ti].toUpperCase(), lw - 28, story ? 34 : 24, 900, F.d, 12); ctx.fillText(names[ti].toUpperCase(), pad + lw / 2, y + (rh - (story ? 10 : 6)) / 2 + 2);
+      ctx.globalAlpha = 1;
+      // the rows: dark until a face lands in them. Drawn again over the points once lit, so a face still waiting in
+      // the wall passes behind a label and never burns through it
+      const labels = (over) => shown.forEach((ti, k) => {
+        const a = seg(s, 0.1 + k * 0.05, 0.5 + k * 0.05); if (a <= 0 || (over && (!groups[ti].length || s < litAt[ti] - 0.04 || s > tS))) return;
+        const y = top + k * rh, g = groups[ti], on = g.length ? seg(s, litAt[ti] - 0.04, litAt[ti] + 0.14) : 0, flash = g.length && s >= litAt[ti] ? Math.exp(-(s - litAt[ti]) * 7) : 0;
+        ctx.globalAlpha = a * 0.34; ctx.fillStyle = 'rgba(215,221,229,.1)'; ctx.fillRect(pad, y, lw, bh);
+        if (on > 0) { ctx.globalAlpha = a * on; ctx.fillStyle = RAMP[ti]; ctx.fillRect(pad, y, lw, bh); }
+        if (flash > 0.02) { ctx.globalAlpha = a * flash * 0.7; ctx.fillStyle = '#fff'; ctx.fillRect(pad, y, lw, bh); }
+        ctx.globalAlpha = a * lerp(0.34, 1, on); ctx.fillStyle = on > 0.5 ? C.ink : C.paper; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        fit(ctx, names[ti].toUpperCase(), lw - 28, story ? 34 : 24, 900, F.d, 12); ctx.fillText(names[ti].toUpperCase(), pad + lw / 2, y + bh / 2 + 2);
         ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
-        ctx.strokeStyle = C.line; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(pad + lw + 12, y + rh - (story ? 5 : 3)); ctx.lineTo(W - pad, y + rh - (story ? 5 : 3)); ctx.stroke();
-        g.slice(0, per).forEach((r, j) => {
-          const more = j === per - 1 && g.length > per, x = pad + lw + 16 + j * step, pa = seg(s, 0.45 + k * 0.12 + j * 0.06, 0.8 + k * 0.12 + j * 0.06);
-          if (pa <= 0) return;
-          ctx.globalAlpha = a * pa;
-          if (more) { ctx.strokeStyle = C.faint; ctx.strokeRect(x + 1, y + 1, tw - 2, th - 2); ctx.fillStyle = C.paper; ctx.font = font(500, story ? 30 : 20, F.m); ctx.textAlign = 'center'; ctx.fillText(`+${g.length - per + 1}`, x + tw / 2, y + th / 2 + 8); ctx.textAlign = 'left'; return; }
-          ctx.fillStyle = '#0a0d12'; ctx.fillRect(x, y, tw, th);
-          ctx.save(); ctx.beginPath(); ctx.rect(x, y, tw, th); ctx.clip(); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(r.bust.cut, x, y + (1 - out(pa)) * 12, tw, th); ctx.restore();
-          ctx.strokeStyle = sorted[0] === r ? C.acid : C.faint; ctx.lineWidth = sorted[0] === r ? 3 : 1.5; ctx.strokeRect(x + 1, y + 1, tw - 2, th - 2);
-          const ph = story ? 30 : 22; ctx.fillStyle = sorted[0] === r ? C.acid : 'rgba(5,7,10,.82)'; ctx.fillRect(x, y + th - ph, tw, ph);
-          ctx.fillStyle = sorted[0] === r ? C.ink : C.paper; ctx.font = font(500, story ? 20 : 15, F.m); ctx.textAlign = 'center'; ctx.fillText(one(r.psl), x + tw / 2, y + th - (story ? 8 : 6)); ctx.textAlign = 'left';
-        });
+        if (!over) { ctx.globalAlpha = a; ctx.strokeStyle = C.line; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(pad + lw + 12, y + rh - (story ? 5 : 3)); ctx.lineTo(W - pad, y + rh - (story ? 5 : 3)); ctx.stroke(); }
         ctx.globalAlpha = 1;
       });
-      const endA = seg(s, 1.9, 2.4);
+      labels(false);
+      // each face: the ground of its cell as it lands, and above the scan line its photograph
+      sorted.forEach((r) => {
+        const c = cell.get(r), in_ = seg(s, land.get(r) - 0.15, land.get(r) + 0.05);
+        if (c.over || in_ <= 0) return;
+        ctx.globalAlpha = in_; ctx.fillStyle = '#0a0d12'; ctx.fillRect(c.x, c.y, c.w, c.h); ctx.globalAlpha = 1;
+        photoIn(ctx, r.bust.cut, c, { bottom: lineY });
+      });
+      // the faces themselves, as points
+      if (field && field.alive) {
+        let ok = true;
+        if (s < tS) sorted.forEach((r, f) => {
+          const m = clamp((s - start.get(r)) / (land.get(r) - start.get(r)));
+          ok = field.draw({ w: W, h: H, from: 0, to: 1, first: f * pts, n: pts, mix: io(m), delay: 0.5, spread: 30, arc: 0.3, time: s, drift: m <= 0 ? 1.2 : 0.5, size, gain: 0.78 + (m >= 1 ? 0.7 * Math.exp(-(s - land.get(r)) * 8) : 0), keep: f > 0 }) && ok;
+        });
+        else ok = field.draw({ w: W, h: H, from: 1, to: 2, mix: frontAt(lineY, H), delay: FRONT, sweep: 1, sweepDir: [0, 1], sweepNoise: FRONT_NOISE, spread: 0, arc: 0, time: s, size, gain: 0.78 });
+        if (ok) { ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(field.canvas, 0, 0); ctx.globalCompositeOperation = 'source-over'; }
+      } else if (s < tL) { // no WebGL: the photographs make the trip
+        sorted.forEach((r) => {
+          const c = cell.get(r), m = io(clamp((s - start.get(r)) / (land.get(r) - start.get(r)))), a = seat(r);
+          if (m >= 1) return;
+          ctx.globalAlpha = c.over ? 1 - m : 1; ctx.drawImage(r.bust.cut, lerp(a.x, c.x, m), lerp(a.y, c.y, m), lerp(a.w, c.w, m), lerp(a.h, c.h, m)); ctx.globalAlpha = 1;
+        });
+      }
+      labels(true);
+      scanLine(ctx, pad, lineY, W - pad * 2, ps > 0 && ps < 1 ? 1 : 0);
+      // over each face: its frame and its number, counting as it lands
+      sorted.forEach((r) => {
+        const c = cell.get(r), at = land.get(r), in_ = seg(s, at - 0.05, at + 0.15), first = sorted[0] === r;
+        if (in_ <= 0) return;
+        ctx.globalAlpha = in_;
+        if (c.over) {
+          if (groups[c.ti][per - 1] !== r) { ctx.globalAlpha = 1; return; } // one "+N" for the row
+          const more = groups[c.ti].slice(per - 1).filter((o) => s >= land.get(o)).length;
+          ctx.strokeStyle = C.faint; ctx.lineWidth = 1.5; ctx.strokeRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2); ctx.fillStyle = C.paper; ctx.font = font(500, story ? 30 : 20, F.m); ctx.textAlign = 'center'; ctx.fillText(`+${more}`, c.x + c.w / 2, c.y + c.h / 2 + 8); ctx.textAlign = 'left';
+          ctx.globalAlpha = 1; return;
+        }
+        const pulse = first && s >= at ? Math.exp(-(s - at) * 5) : 0;
+        ctx.strokeStyle = first ? C.acid : C.faint; ctx.lineWidth = first ? 3 + 7 * pulse : 1.5; ctx.strokeRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2);
+        const ph = story ? 30 : 22; ctx.fillStyle = first ? C.acid : 'rgba(5,7,10,.82)'; ctx.fillRect(c.x, c.y + c.h - ph, c.w, ph);
+        ctx.fillStyle = first ? C.ink : C.paper; ctx.font = font(500, story ? 20 : 15, F.m); ctx.textAlign = 'center';
+        ctx.fillText(one(lerp(Math.max(1, r.psl - 1.2), r.psl, out(seg(s, at - 0.05, at + 0.35)))), c.x + c.w / 2, c.y + c.h - (story ? 8 : 6)); ctx.textAlign = 'left';
+        ctx.globalAlpha = 1;
+      });
+      const endA = seg(s, tE - 0.1, tE + 0.4);
       if (story) ctaBar(ctx, pad, 1612 + (1 - out(endA)) * 22, W - pad * 2, 58, endA, '¿EN QUÉ FILA CAES?');
       else if (endA > 0) { ctx.globalAlpha = endA; ctx.fillStyle = C.acid; ctx.font = font(500, 17, F.m); tracked(ctx, `¿EN QUÉ FILA CAES TÚ? → ${SITE}`, W / 2, H - 16, 1, 'center'); ctx.globalAlpha = 1; }
     },
