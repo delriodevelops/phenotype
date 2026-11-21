@@ -147,6 +147,29 @@ export function createStage(canvas, view) {
 
   function size(w, h) { if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; } canvas.dataset.fmt = w > h ? 'x' : 'story'; }
 
+  // ---------- a result that can be looked into: a face of the tier list, opened over the list ----------
+  // look: { i, p, to, next }: face i, how open it is (0–1) and where it is heading; next: the face to open once closed
+  let look = null, lookRaf = 0, playing = false, onLook = null;
+  function lookStep(now) {
+    lookRaf = 0;
+    if (!look || !scene || !scene.detail) return;
+    const dt = Math.min(0.05, (now - look.last) / 1000); look.last = now;
+    look.p = reduced ? look.to : clamp(look.p + (look.to > look.p ? dt / 1.2 : -dt / 0.45));
+    if (look.to === 0 && look.p <= 0) { const next = look.next; look = null; scene.frame(ctx, 1); if (next != null) openLook(next); return; }
+    scene.detail(ctx, look.i, look.p);
+    if (look.p !== look.to) lookRaf = requestAnimationFrame(lookStep);
+  }
+  function openLook(i) { look = { i, p: 0, to: 1, last: performance.now(), next: null }; onLook?.(scene.rowAt(i)); if (!lookRaf) lookRaf = requestAnimationFrame(lookStep); }
+  function closeLook(next = null) { if (!look) return; look.to = 0; look.next = next; look.last = performance.now(); if (next == null) onLook?.(null); if (!lookRaf) lookRaf = requestAnimationFrame(lookStep); }
+  function dropLook() { look = null; cancelAnimationFrame(lookRaf); lookRaf = 0; }
+  const under = (e) => { const r = canvas.getBoundingClientRect(); return scene.pick(((e.clientX - r.left) / r.width) * canvas.width, ((e.clientY - r.top) / r.height) * canvas.height, look ? look.i : -1); };
+  canvas.addEventListener('click', (e) => {
+    if (!scene || !scene.pick || playing) return;
+    const i = under(e);
+    if (look) closeLook(i >= 0 && i !== look.i ? i : null); else if (i >= 0) openLook(i);
+  });
+  canvas.addEventListener('pointermove', (e) => { canvas.style.cursor = scene && scene.pick && !playing && (look || under(e) >= 0) ? 'pointer' : ''; });
+
   // ---------- pointer: the specimen turns under the hand (while it is points) ----------
   if (view && matchMedia('(hover: hover) and (pointer: fine)').matches) {
     view.addEventListener('pointermove', (e) => { const r = canvas.getBoundingClientRect(); ptr.tx = clamp(((e.clientX - r.left) / r.width - 0.5) * 2, -1, 1); ptr.ty = clamp(((e.clientY - r.top) / r.height - 0.5) * 2, -1, 1); ptr.on = true; });
@@ -176,20 +199,26 @@ export function createStage(canvas, view) {
     // resolves once the faces on the stage are points (the pass started by scan(true) is over)
     scanned: () => scanned,
     // hand the canvas to a card scene and play its reveal from `from` (default: where the stage leaves off)
-    async run(sc, { from = sc.enter, full = false } = {}) {
-      stopTour(); finish(); live = false; scanning = 0; cancelAnimationFrame(raf); raf = 0;
+    // onTime(s): called with the second of the reveal each frame shows (Infinity once it is over)
+    async run(sc, { from = sc.enter, full = false, onTime = null } = {}) {
+      stopTour(); finish(); live = false; scanning = 0; cancelAnimationFrame(raf); raf = 0; dropLook();
       scene = sc; size(sc.W, sc.H);
       const id = ++playId, start = full ? 0 : from;
-      await play((t) => { if (id === playId) sc.frame(ctx, t); }, sc.ms * (1 - start), start);
-      if (id === playId) sc.frame(ctx, 1);
+      playing = true;
+      await play((t) => { if (id === playId) { sc.frame(ctx, t); onTime?.(t >= 1 ? Infinity : (t * sc.ms) / 1000); } }, sc.ms * (1 - start), start);
+      if (id === playId) { sc.frame(ctx, 1); playing = false; onTime?.(Infinity); }
       return id === playId;
     },
     // the still that gets shared: the last frame, at once
-    settle() { playId++; if (scene) scene.frame(ctx, 1); },
+    settle() { playId++; playing = false; dropLook(); if (scene) scene.frame(ctx, 1); },
+    // called with the row of a face when it is opened over a finished list (card.js rankScene detail), null when closed
+    set onLook(fn) { onLook = fn; },
+    // open face i of the list (or close with -1), as a click on it does
+    look(i) { if (!scene || !scene.detail || playing) return; if (look) closeLook(i >= 0 && i !== look.i ? i : null); else if (i >= 0) openLook(i); },
     get scene() { return scene; },
     // back to a live stage with what was on it (after a result: the faces that were measured, as photographs)
     resume() {
-      playId++; scene = null; live = true; scanning = 0; wipe = null; old = null; morph = null; next = null; size(W, H);
+      playId++; playing = false; dropLook(); onLook = null; scene = null; live = true; scanning = 0; wipe = null; old = null; morph = null; next = null; size(W, H);
       if (cur) { const f = build(cur.items); if (f) field.put(cur.slot, f); cur.as = cur.items.length ? 'photos' : 'points'; }
       kick();
     },

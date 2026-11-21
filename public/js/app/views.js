@@ -3,7 +3,7 @@
 // out for and, in a versus, who takes each trait.
 import { IDEALS } from './face.js';
 import { tierFor, facePercentile } from './score.js';
-import { versusScene, rankScene, verdictOf, topText } from './card.js';
+import { versusScene, rankScene, verdictOf, topText, pickMeasures } from './card.js';
 import { shareableMarkup, mountShareable } from './shareable.js';
 import { specimenId } from './report.js';
 import { breakdown, duel, listed, measureLines, edgeLines } from './breakdown.js';
@@ -25,7 +25,7 @@ const inRange = (k, v) => Number.isFinite(v) && v >= IDEALS[k].lo && v <= IDEALS
 function person(r, pos, label, B, { open = false, top: first = false } = {}) {
   const m = r.entry.face.metrics, turned = Math.abs(m.yaw_deg || 0) >= 12;
   const val = (k) => (k === 'symmetry' && turned ? NaN : m[k]);
-  return `<li${first ? ' class="is-top"' : ''}><details class="person"${open ? ' open' : ''}>
+  return `<li${first ? ' class="is-top"' : ''} data-at="face:${r.n ?? ''}"><details class="person" data-n="${r.n ?? ''}"${open ? ' open' : ''}>
     <summary><span class="rank__pos">${pos}</span><img class="rank__face" src="${r.bust.thumb()}" alt="${esc(label)}"><span class="rank__who"><b>${esc(tierText(r))}</b>${esc(label)} · ${who(r)} · ${esc(top(r))}<em>Destaca en ${esc(listed(B.best))}</em></span><span class="rank__psl">${one(r.psl)}</span></summary>
     <div class="person__body">
       <ul class="traits">${B.traits.map((t) => `<li${B.best.includes(t) ? ' class="is-best"' : ''}><span>${esc(t.label)}</span>${bar(t.score)}<b>${t.score.toFixed(1)}</b></li>`).join('')}</ul>
@@ -43,18 +43,18 @@ export function renderVersus(root, [a, b], stage) {
   root.classList.add('result--multi');
   root.innerHTML = `
     <header class="result__head">
-      <p class="label">Versus${winner == null ? '' : ` · gana <b>${esc(tierText(faces[winner]))}</b>`}</p>
-      <h2 class="result__tier">${esc(verdict.toLowerCase())}${winner == null ? '' : ` <span>+${Math.abs(d).toFixed(1)} PSL</span>`}</h2>
+      <p class="label" data-at="verdict">Versus${winner == null ? '' : ` · gana <b>${esc(tierText(faces[winner]))}</b>`}</p>
+      <h2 class="result__tier" data-at="verdict">${esc(verdict.toLowerCase())}${winner == null ? '' : ` <span>+${Math.abs(d).toFixed(1)} PSL</span>`}</h2>
     </header>
     ${shareableMarkup()}
     <section class="duel block" aria-label="Rasgo a rasgo">
       <h3 class="h3">Rasgo a rasgo</h3>
-      <div class="duel__head">${head(a, 0)}<span class="duel__vs">vs</span>${head(b, 1)}</div>
-      <ol class="duel__rows">${rows.map((x) => `<li${x.side == null ? '' : ` data-win="${x.side}"`}><b class="duel__n">${x.a.toFixed(1)}</b>${bar(x.a, 'bar--l')}<span class="duel__t">${esc(x.label)}</span>${bar(x.b)}<b class="duel__n">${x.b.toFixed(1)}</b></li>`).join('')}</ol>
-      <p class="duel__sum">${[0, 1].map((s) => `<span><b>Cara ${s + 1}</b> ${took[s].length ? `se lleva ${took[s].length} de ${rows.length}: ${esc(listed(took[s]))}.` : 'no se lleva ningún rasgo.'} Destaca en ${esc(listed(B[s].best))}.</span>`).join('')}</p>
+      <div class="duel__head" data-at="verdict">${head(a, 0)}<span class="duel__vs">vs</span>${head(b, 1)}</div>
+      <ol class="duel__rows">${rows.map((x) => `<li data-at="trait:${x.key}"${x.side == null ? '' : ` data-win="${x.side}"`}><b class="duel__n">${x.a.toFixed(1)}</b>${bar(x.a, 'bar--l')}<span class="duel__t">${esc(x.label)}</span>${bar(x.b)}<b class="duel__n">${x.b.toFixed(1)}</b></li>`).join('')}</ol>
+      <p class="duel__sum" data-at="end">${[0, 1].map((s) => `<span><b>Cara ${s + 1}</b> ${took[s].length ? `se lleva ${took[s].length} de ${rows.length}: ${esc(listed(took[s]))}.` : 'no se lleva ningún rasgo.'} Destaca en ${esc(listed(B[s].best))}.</span>`).join('')}</p>
       ${NOTE}
     </section>
-    <div class="block">
+    <div class="block" data-at="end">
       <h3 class="h3">Cada cara, al detalle</h3>
       <ol class="people">${faces.map((r, i) => person(r, winner === i ? 'W' : winner == null ? '=' : 'L', `Cara ${i + 1}`, B[i], { top: winner === i })).join('')}</ol>
     </div>
@@ -82,27 +82,34 @@ export function renderVersus(root, [a, b], stage) {
 }
 
 export function renderRanking(root, list, stage) {
-  const rows = [...list].sort((x, y) => y.psl - x.psl);
+  const rows = [...list].sort((x, y) => y.psl - x.psl), B = new Map(rows.map((r) => [r, breakdown(r)]));
   root.classList.add('result--multi');
   root.innerHTML = `
     <header class="result__head">
-      <p class="label">Lote · arriba <b>${esc(tierText(rows[0]))}</b>, PSL ${one(rows[0].psl)}</p>
+      <p class="label" data-at="face:${rows[0].n ?? ''}">Lote · arriba <b>${esc(tierText(rows[0]))}</b>, PSL ${one(rows[0].psl)} · pulsa una cara de la lista para abrir su análisis, o «+N» para desplegar la fila</p>
       <h2 class="result__tier">Tier list <span>${rows.length} caras</span></h2>
     </header>
     ${shareableMarkup()}
     <div class="block">
       <h3 class="h3">Cada cara, al detalle</h3>
-      <ol class="people">${rows.map((r, i) => person(r, i + 1, `Cara ${r.n}`, breakdown(r), { open: i === 0, top: i === 0 })).join('')}</ol>
+      <ol class="people">${rows.map((r, i) => person(r, i + 1, `Cara ${r.n}`, B.get(r), { open: i === 0, top: i === 0 })).join('')}</ol>
       ${NOTE}
     </div>
     ${restart}`;
   const id = specimenId();
   stage.canvas.setAttribute('aria-label', `Tier list de ${rows.length} caras`);
+  // a face opened on the list opens its full reading beside it too
+  stage.onLook = (row) => { if (row) root.querySelectorAll('.person').forEach((d) => { d.open = d.dataset.n === String(row.n); }); };
   return mountShareable(root, {
     stage, name: 'phenotype-tier-list',
     text: [`Tier list de ${rows.length} caras en PHENOTYPE`,
     `Arriba: ${tierText(rows[0])} · PSL ${one(rows[0].psl)}/8`, ...measureLines(rows[0].entry?.face?.metrics).filter((l) => l.startsWith('✓')),
       '¿En qué fila caes tú?'].join('\n'),
-    build: (f, mode) => rankScene(stage.field, f, rows.map((r) => ({ bust: r.bust.read(mode), psl: r.psl, tier: tierText(r), sex: r.sex, n: r.n })), id),
+    // each face goes to the list with what its reading shows: its best trait and measure in the reveal, and all of
+    // them when it is opened over the list
+    build: (f, mode) => rankScene(stage.field, f, rows.map((r) => {
+      const b = B.get(r), stats = pickMeasures(r.bust.lm, r.entry?.face?.metrics, 3, 0.1);
+      return { bust: r.bust.read(mode), psl: r.psl, tier: tierText(r), sex: r.sex, n: r.n, best: b.best[0], bests: b.best.map((t) => t.key), weak: b.weak.map((t) => t.key), traits: b.traits, stat: pickMeasures(r.bust.lm, r.entry?.face?.metrics, 1)[0], stats: stats.map((st) => ({ ...st, side: 'r' })) };
+    }), id),
   });
 }

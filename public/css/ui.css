@@ -424,3 +424,8 @@ main [id] { scroll-margin-top: calc(var(--hud-h) + 12px); }
 }
 
 #analizar, main [id] { scroll-margin-top: calc(var(--hud-h) + 12px); }
+
+/* A result beside the canvas waits for the reveal to reach it (shareable.js: data-at): held out of sight in its own
+   place, so nothing moves when it arrives. */
+[data-at] { transition: opacity .45s var(--ease); }
+[data-at].is-held { opacity: 0; visibility: hidden; transition: none; }

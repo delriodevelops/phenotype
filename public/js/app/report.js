@@ -34,13 +34,13 @@ export function renderResult(root, { scores: s, metrics: m = {}, bust, stage, pr
   root.innerHTML = `
     <header class="result__head">
       <p class="label">${demo ? 'Demostración · caso 001 · <b>así sale el tuyo</b>' : `Resultado${range ? ' · <b>medida dudosa</b>: prueba otra foto de frente y con buena luz' : ''}`}</p>
-      <h2 class="result__tier">${esc(tierText)} <span>PSL ${one(s.psl.now)}</span></h2>
-      ${ladderMarkup(s.psl.now, sex)}
+      <h2 class="result__tier" data-at="verdict">${esc(tierText)} <span>PSL ${one(s.psl.now)}</span></h2>
+      <div data-at="verdict">${ladderMarkup(s.psl.now, sex)}</div>
     </header>
     ${shareableMarkup()}
     <p class="result__actions">${demo ? '<button class="btn btn--go" type="button" data-pick-file>Ahora tú: subir foto</button>' : '<button class="btn" type="button" data-versus>Versus: retar a otra cara</button> <button class="btn btn--quiet" type="button" data-restart>Medir otra foto</button>'}</p>
     <div class="result__side">
-      <div class="block">
+      <div class="block" data-at="end">
         <h3 class="h3">Tu sitio entre cien</h3>
         <div class="among">${hundred(s.percentile.now)}<p class="among__t"><b>${top ? `${top[0]} ${top[1]}` : '—'}</b>Superas a ${beat} de cada 100 ${sex === 'f' ? 'mujeres' : 'hombres'} en SMV: cara, altura, cuerpo, estatus y soltura social.</p></div>
         <dl class="readout">
@@ -50,14 +50,14 @@ export function renderResult(root, { scores: s, metrics: m = {}, bust, stage, pr
         </dl>
         ${assumed.length && !demo ? `<p class="disclaimer">Supuesto (sin responder): ${esc(assumed.join(', '))}. Rellena los datos opcionales para afinar el SMV.</p>` : ''}
       </div>
-      <div class="block">
+      <div class="block" data-at="end">
         <h3 class="h3">Cómo subir</h3>
         <div class="pots">
           <div class="pot"><span class="label">Potencial natural · hábitos</span><p class="pot__n">${one(s.psl.natural)}<small>${esc(s.tier.natural)}</small></p><ul class="recs">${NATURAL_RECS.slice(0, 4).map(rec).join('')}</ul></div>
           <div class="pot"><span class="label">Potencial extremo · cirugía</span><p class="pot__n">${one(s.psl.extreme)}<small>${esc(s.tier.extreme)}</small></p><ul class="recs">${EXTREME_RECS.slice(0, 4).map(rec).join('')}</ul></div>
         </div>
       </div>
-      <div class="block">
+      <div class="block" data-at="measures">
         <h3 class="h3">Lo que se midió</h3>
         <ul class="measures">${Object.entries(IDEALS).map(([k, i]) => `<li${inRange(k, m[k]) ? ' data-in' : ''}><span>${esc(i.label)}</span><span><b>${fmt(k, m[k])}</b><small>ideal ${ideal(i)}</small></span></li>`).join('')}</ul>
       </div>

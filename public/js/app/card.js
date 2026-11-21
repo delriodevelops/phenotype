@@ -163,6 +163,22 @@ function smallPrint(ctx, W, a) {
   tracked(ctx, 'ESTIMACIÓN CON IA · SE MIDE EN EL NAVEGADOR · LA FOTO NO SE SUBE', W / 2, 1752, 1.5, 'center');
   ctx.globalAlpha = 1;
 }
+// The camera: a hit pushes the picture in for an instant and lets go. hits: [[second, amount]]. At rest the scale
+// is exactly 1, so the still that gets shared is never resampled.
+const punch = (s, hits) => hits.reduce((z, [at, amp]) => z + (s >= at ? amp * Math.exp(-(s - at) * 9) : 0), 0);
+function camera(ctx, W, H, z) {
+  if (Math.abs(z - 1) < 0.0012) z = 1;
+  ctx.setTransform(z, 0, 0, z, ((1 - z) * W) / 2, (1 - z) * H * 0.45);
+}
+// the instrument running: its clock and its point count in the foot of a story, gone before the reveal ends
+function timecode(ctx, W, H, s, T, n) {
+  const a = seg(s, 0, 0.3) * (1 - seg(s, T - 0.9, T - 0.4));
+  if (a <= 0) return;
+  ctx.globalAlpha = a * 0.55; ctx.fillStyle = C.dim; ctx.font = font(500, 18, F.m);
+  tracked(ctx, `T+${s.toFixed(2).padStart(5, '0')}`, 72, H - 72, 2);
+  if (n) tracked(ctx, `${n.toLocaleString('es-ES')} PTS`, W - 72, H - 72, 2, 'right');
+  ctx.globalAlpha = 1;
+}
 export function scanLine(ctx, x, y, w, a = 1) {
   if (a <= 0) return;
   ctx.globalAlpha = a;
@@ -170,6 +186,9 @@ export function scanLine(ctx, x, y, w, a = 1) {
   g.addColorStop(0, 'rgba(198,255,61,.22)'); g.addColorStop(1, 'rgba(198,255,61,0)');
   ctx.fillStyle = g; ctx.fillRect(x, y, w, 110);
   ctx.fillStyle = C.acid; ctx.fillRect(x - 16, y - 1.5, w + 32, 3);
+  // its rule: a tick every 36 px, and the height it stands at
+  ctx.globalAlpha = a * 0.7; for (let tx = x; tx <= x + w; tx += 36) ctx.fillRect(tx, y - 9, 1.5, 7);
+  ctx.font = font(500, 14, F.m); ctx.textAlign = 'right'; ctx.fillText(`Y ${String(Math.max(0, Math.round(y))).padStart(4, '0')}`, x + w + 16, y - 14); ctx.textAlign = 'left';
   ctx.globalAlpha = 1;
 }
 // A face as the photograph it is — the cut-out, nothing behind it — in rect r, on one side of the scan line:
@@ -278,11 +297,11 @@ const idealText = (k) => { const i = IDEALS[k]; return i.hi >= i.max ? `${i.lo}+
 // The measures a card shows, chosen for this face: the one closest to its ideal, the one furthest from it, then the
 // next closest; never two at the same height (their readouts would sit on each other). Top to bottom, alternating
 // margins. lm: the landmarks of the crop · m: the metrics of face.js
-export function pickMeasures(lm, m = {}, n = 3) {
+export function pickMeasures(lm, m = {}, n = 3, apart = 0.075) {
   const all = Object.keys(GAUGES).map((key) => ({ key, v: m[key], c: closeness(key, m[key]), g: gaugeOf(lm, key) })).filter((x) => x.c != null && x.g).sort((a, b) => b.c - a.c);
   if (!all.length) return [];
   const got = [];
-  for (const x of [all[0], all[all.length - 1], ...all.slice(1, -1)]) if (got.length < n && !got.includes(x) && got.every((o) => Math.abs(o.g.y - x.g.y) > 0.075)) got.push(x);
+  for (const x of [all[0], all[all.length - 1], ...all.slice(1, -1)]) if (got.length < n && !got.includes(x) && got.every((o) => Math.abs(o.g.y - x.g.y) > apart)) got.push(x);
   got.sort((a, b) => a.g.y - b.g.y);
   return got.map((x, i) => ({ key: x.key, v: x.v, ok: x.v >= IDEALS[x.key].lo && x.v <= IDEALS[x.key].hi, side: i % 2 ? 'r' : 'l' }));
 }
@@ -369,15 +388,20 @@ export function cardScene(field, fmt, d) {
   }
   const onCard = shaped(an.cut, { sink: [COLLAR - 0.07, COLLAR] }); // the face as it stands on the card: gone under the collar
   // the clock, in seconds: acquire · measure · everyone · the front crosses · it stops · the number · the card · the photo
-  const MD = 0.66, tM = 0.9, tB = tM + (meas.length ? meas.length * MD + 0.12 : 0.8), tG = tB + 0.7, tH = tG + 1.3, tN = tH + 0.3, tV = tN + 0.5, tC = tV + 0.85, tS = tC + 1.05, tE = tS + 0.75, T = tE + 0.75;
+  const MD = 0.56, tM = 0.9, tB = tM + (meas.length ? meas.length * MD + 0.12 : 0.8), tG = tB + 0.7, tH = tG + 1.3, tN = tH + 0.3, tV = tN + 0.5, tC = tV + 0.85, tS = tC + 1.05, tE = tS + 0.75, T = tE + 0.75;
   const size = story ? 3 : 2.3, P = L.pop, popTop = P.base - P.h;
+  const hits = [...meas.map((st, i) => [tM + 0.06 + i * MD + MD * 0.66, 0.01]), [tH, 0.028], [tV, 0.042]]; // each measure called · the front stops · the verdict
   const pinAt = (st, r) => edge(an.lm, st.g.y, st.side, r), pinX = (st) => L.pin[st.side === 'r' ? 1 : 0];
   return {
     W, H, ms: T * 1000, enter: tM / T, again: tC / T,
+    // when (s) the page beside the canvas may show what the reveal has reached: it never runs ahead of it
+    cues: { measures: tB, verdict: tV + 0.45, end: tE + 0.3 },
     frame(ctx, t) {
       const s = t * T, tick = Math.floor(s * 16);
       const p0 = seg(s, 0, tM), pB = seg(s, tB, tG), pG = seg(s, tG, tH), pN = seg(s, tN, tV), p4 = seg(s, tC, tS), p5 = seg(s, tS, tE), p6 = seg(s, tS + 0.4, T - 0.1);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ground(ctx, W, H, W / 2, story ? H * 0.42 : H * 0.5);
+      camera(ctx, W, H, t >= 1 ? 1 : 1 + 0.014 * seg(s, tM, tB) * (1 - seg(s, tB, tG)) + punch(s, hits)); // a slow push while it measures
       const cutY = L.hero.y + L.hero.h * io(p0);
       // the photo as it came, eaten from the top by the scan line
       photoIn(ctx, an.cut, L.hero, { top: cutY, alpha: 1 - seg(s, tM - 0.1, tM + 0.05) });
@@ -505,6 +529,8 @@ export function cardScene(field, fmt, d) {
         ctaBar(ctx, L.cta.x, L.cta.y + (1 - end) * 22, L.cta.w, L.cta.h, endA);
         if (story) smallPrint(ctx, W, endA);
       }
+      if (story) timecode(ctx, W, H, s, T, N);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
     },
   };
 }
@@ -567,18 +593,22 @@ export function versusScene(field, fmt, a, b, winner, id = '', rows = []) {
   const size = story ? 2.7 : 2.3, shown = rows.slice(0, 5);
   // the traits, played one by one before any total: the closest call first, the widest gap last
   const rounds = [...shown].sort((x, y) => Math.abs(x.a - x.b) - Math.abs(y.a - y.b)), RD = 0.64, r0 = 0.8, r1 = r0 + (rounds.length ? rounds.length * RD + 0.15 : 0);
+  const hits = [...rounds.map((r, i) => [r0 + i * RD + RD * 0.62, 0.012]), [2.5 + r1 - r0, 0.05]]; // each trait called · the verdict lands
   const T = 5.6 + r1 - r0; // the rest of the reveal runs on its own clock (u), which waits while the traits are played
   const NX = story ? [pad, W - pad] : null; // a story's two numbers stand on the outer margins: the tape goes between them
   const best = sides.map((sd) => (sd.best || []).slice(0, 2)), line = (names) => names.map((n) => n.toUpperCase()).join(' · ');
   return {
     W, H, ms: T * 1000, enter: 0.8 / T, again: (2.2 + r1 - r0) / T,
+    cues: { ...Object.fromEntries(rounds.map((r, i) => [`trait:${r.key}`, r0 + i * RD + RD * 0.7])), verdict: 2.75 + r1 - r0, end: 4.5 + r1 - r0 },
     frame(ctx, t) {
       const real = t * T, s = real < r0 ? real : real < r1 ? r0 : real - (r1 - r0), tick = Math.floor(real * 16);
       const p0 = seg(s, 0, 0.8), p1 = seg(s, 0.8, 2.3), p2 = seg(s, 2.3, 3.4), p3 = seg(s, 3.4, 4.2), p4 = seg(s, 4.2, 4.8);
       // the trait in play: which one, how far into it, and whether it has been called
       const ri = rounds.length && real >= r0 && real < r1 ? Math.min(rounds.length - 1, Math.floor((real - r0) / RD)) : -1, round = ri < 0 ? null : rounds[ri];
       const rq = ri < 0 ? 0 : clamp((real - r0 - ri * RD) / RD), env = seg(rq, 0, 0.15) * (1 - seg(rq, 0.88, 1)), called = seg(rq, 0.55, 0.7);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ground(ctx, W, H, W / 2, H / 2);
+      camera(ctx, W, H, t >= 1 ? 1 : 1 + punch(real, hits));
       const cutY = y0 + (y1 - y0) * io(p0); // one scan line crosses both faces
       sides.forEach((sd, i) => photoIn(ctx, still[i], R[i], { top: cutY, alpha: 1 - seg(s, 0.7, 0.85), ...col(i) }));
       const lost = (i) => winner != null && winner !== i;
@@ -677,15 +707,20 @@ export function versusScene(field, fmt, a, b, winner, id = '', rows = []) {
       if (story) tape(ctx, shown, cx, 1310, 40, 28, 376, tp); else tape(ctx, shown, cx, by + 84, 26, 18, 300, tp);
       if (story) ctaBar(ctx, pad, 1612 + (1 - end) * 22, W - pad * 2, 58, endA, '¿A QUIÉN GANAS TÚ?');
       else if (endA > 0) { ctx.globalAlpha = endA; ctx.fillStyle = C.acid; ctx.font = font(500, 17, F.m); tracked(ctx, `¿A QUIÉN GANAS TÚ? → ${SITE}`, cx, H - 22, 1, 'center'); ctx.globalAlpha = 1; }
+      if (story) timecode(ctx, W, H, real, T, N);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
     },
   };
 }
 
 // ---------- tier list (three faces or more) ----------
-// rows: [{ bust, psl, tier, sex, n }] in any order (n: the order they were chosen in, which is how they stand on the
-// stage). The format everyone already knows how to read: seven rows, best on top, every face in the row it earned.
-// The faces wait as points, in a wall; worst first, each one flies to its row, which lights when it gets its first
-// face, and the best goes last. Then one scan down the list gives every face back as its photograph.
+// rows: [{ bust, psl, tier, sex, n, best?: { key, label, score }, stat?: a pickMeasures() entry }] in any order (n: the
+// order they were chosen in, which is how they stand on the stage). The format everyone already knows how to read:
+// seven rows, best on top, every face in the row it earned.
+// The faces leave the wall for a queue and are called one by one, worst first, to the bay: each is scanned there, its
+// best measure is taken on it, what it stands out for lights up and its PSL climbs the rows until it locks on one;
+// stamped with its tier, it flies to its cell. The best goes last. Then one scan down the list gives every face
+// back as its photograph. The reveal lasts as long as there are faces to read.
 const RAMP = ['#ff3b2f', '#6b727c', '#9aa3ad', '#d7dde5', '#dcf08f', '#d1f866', '#c6ff3d']; // Sub-5 → True Adam
 export function rankScene(field, fmt, rows, id = '') {
   const [W, H] = SIZES[fmt], story = fmt === 'story', pad = story ? 72 : 44, n = rows.length;
@@ -699,38 +734,67 @@ export function rankScene(field, fmt, rows, id = '') {
   // every face's cell in the list; a row with more faces than fit keeps its last cell for "+N", and those faces go into it
   const cell = new Map();
   shown.forEach((ti, k) => groups[ti].forEach((r, j) => cell.set(r, { x: pad + lw + 16 + Math.min(j, per - 1) * step, y: top + k * rh, w: tw, h: th, ti, k, over: groups[ti].length > per && j >= per - 1 })));
-  // ...and its place in the wall it leaves
+  // where a face stands before that: the wall it comes from, the queue it waits in, the bay it is read in
   const seats = wall(n, fmt), seated = [...sorted].sort((a, b) => (a.n ?? 0) - (b.n ?? 0)), seat = (r) => seats[seated.indexOf(r)].rect;
-  // the clock: worst first; the best waits a beat and takes its time
-  const order = [...sorted].reverse(), gapT = clamp(2.6 / n, 0.12, 0.55), t0 = 0.55, start = new Map(), land = new Map();
-  order.forEach((r, i) => { const last = i === n - 1, a = t0 + i * gapT + (last ? 0.35 : 0); start.set(r, a); land.set(r, a + (last ? 0.95 : 0.7)); });
-  const tL = land.get(sorted[0]), tS = tL + 0.3, tE = tS + 0.8, T = tE + 0.75;
-  const litAt = groups.map((g) => (g.length ? Math.min(...g.map((r) => land.get(r))) : Infinity));
+  const qw = story ? 110 : 60, qh = qw * 1.4, qstep = story ? Math.min(qw + 14, (W - pad * 2 - qw) / Math.max(1, n - 1)) : Math.min(qh + 8, (H - 160 - qh) / Math.max(1, n - 1));
+  const queue = (r) => { const i = seated.indexOf(r); return story ? { x: (W - qw - qstep * (n - 1)) / 2 + i * qstep, y: 1700, w: qw, h: qh } : { x: W - pad - qw, y: 100 + i * qstep, w: qw, h: qh }; };
+  const bay = story ? { x: 330, y: 360, w: 680, h: 952 } : { x: 650, y: 92, w: 370, h: 518 }, bx = bay.x + bay.w / 2;
+  const place = [seat, queue, () => bay, (r) => cell.get(r)];
+  // the clock: worst first; a face is called (a), stands in the bay (b), locks on its tier (lock), leaves (go) and
+  // lands (land) while the next one is already on its way in. Many faces: each gets a shorter reading, never none.
+  const pace = clamp(9 / n, 0.45, 1), tQ = 1.0, order = [...sorted].reverse(), ev = new Map();
+  let at = tQ;
+  order.forEach((r, i) => { const last = i === n - 1, k = pace * (last ? 1.35 : 1); if (last) at += 0.3; const b = at + 0.32, lock = b + 0.85 * k, go = lock + 0.32 * k; ev.set(r, { i, a: at, b, lock, go, land: go + 0.45, last }); at = go + 0.1; });
+  const tL = ev.get(sorted[0]).land, tS = tL + 0.3, tE = tS + 0.8, T = tE + 0.75;
+  const litAt = groups.map((g) => (g.length ? Math.min(...g.map((r) => ev.get(r).lock)) : Infinity));
+  const hits = sorted.map((r) => [ev.get(r).lock, ev.get(r).last ? 0.05 : 0.028]);
+  // [from, to, mix] of a face at time s: wall → queue → bay → cell
+  const pose = (r, s, f) => {
+    const e = ev.get(r);
+    if (s < e.a) { const m = seg(s, 0.12 + (0.3 * f) / n, 0.68 + (0.3 * f) / n); return m < 1 ? [0, 1, m] : [1, 1, 0]; }
+    if (s < e.b) return [1, 2, (s - e.a) / (e.b - e.a)];
+    if (s < e.go) return [2, 2, 0];
+    if (s < e.land) return [2, 3, (s - e.go) / (e.land - e.go)];
+    return [3, 3, 0];
+  };
   const N = field ? field.max : 0, pts = Math.floor(N / n), size = story ? 3 : 2.3;
   if (field) {
-    // one run of points per face, the same run in the wall and in the list, so each flies on its own clock
-    const a = [], b = [];
-    sorted.forEach((r) => {
-      const smp = r.bust.sample(pts), from = seat(r), to = cell.get(r), k = Math.sqrt((to.w * to.h) / (from.w * from.h));
-      a.push(placeBust(smp, from, { acid: NEUTRAL }));
-      const f = placeBust(smp, to, { acid: to.over ? 0 : charge(r.psl) });
-      for (let i = 0; i < f.n; i++) { f.col[i * 4 + 3] *= k; if (to.over) f.col[i * 4] = f.col[i * 4 + 1] = f.col[i * 4 + 2] = 0; } // smaller points for a smaller face
-      b.push(f);
-    });
-    const list = concat(b);
-    field.put(0, concat(a)); field.put(1, list); field.put(2, lightsOut(list, () => true));
+    // one run of points per face, the same run in every formation, so each face moves on its own clock; smaller
+    // points where the face is smaller
+    const form = (k, acid, hide) => concat(sorted.map((r) => {
+      const to = place[k](r), from = seat(r), sz = clamp(Math.sqrt((to.w * to.h) / (from.w * from.h)), 0.2, 1.3), f = placeBust(r.bust.sample(pts), to, { acid: acid(r) }), off = hide && hide(r);
+      for (let i = 0; i < f.n; i++) { f.col[i * 4 + 3] *= sz; if (off) f.col[i * 4] = f.col[i * 4 + 1] = f.col[i * 4 + 2] = 0; }
+      return f;
+    }));
+    const list = form(3, (r) => charge(r.psl), (r) => cell.get(r).over);
+    field.put(0, form(0, () => NEUTRAL)); field.put(1, form(1, () => NEUTRAL)); field.put(2, form(2, () => NEUTRAL)); field.put(3, list); field.put(4, lightsOut(list, () => true));
   }
+  const gauges = new Map(sorted.map((r) => [r, r.stat ? gaugeOf(r.bust.lm, r.stat.key) : null]));
   const y0 = top - 14, y1 = top + shown.length * rh + 6;
+  // a row unfolded: all its faces as a grid over the list, as large as they fit
+  const unfolded = (ti) => {
+    const g = groups[ti], x0 = pad + lw + 16, aw = W - pad - x0, ay = top + (story ? 48 : 30), ah = bottom - ay, gp = story ? 12 : 8;
+    let best = { w: 0, cols: 1 };
+    for (let cols = 1; cols <= g.length; cols++) { const rws = Math.ceil(g.length / cols), w = Math.min(story ? 220 : 130, (aw - gp * (cols - 1)) / cols, (ah - gp * (rws - 1)) / rws / 1.4); if (w > best.w + 0.5) best = { w, cols }; }
+    return g.map((r, j) => ({ r, x: x0 + (j % best.cols) * (best.w + gp), y: ay + Math.floor(j / best.cols) * (best.w * 1.4 + gp), w: best.w, h: best.w * 1.4 }));
+  };
+  const rowOf = (ti) => shown.reduce((best, t, k) => (Math.abs(t - ti) < Math.abs(shown[best] - ti) ? k : best), 0); // the row a tier reads on (16:9 hides empty rows)
   return {
     W, H, ms: T * 1000, enter: 0, again: (tS - 0.15) / T,
+    cues: { ...Object.fromEntries(sorted.map((r) => [`face:${r.n}`, ev.get(r).land])), end: tE },
     frame(ctx, t) {
-      const s = t * T, ps = seg(s, tS, tE), lineY = field ? lerp(y0, y1, io(ps)) : 1e9, landed = sorted.filter((r) => s >= land.get(r)).length;
+      const s = t * T, ps = seg(s, tS, tE), lineY = field ? lerp(y0, y1, io(ps)) : 1e9;
+      // how much of the picture the bay holds right now, and who is in it
+      let busy = 0, reading = null;
+      for (const r of sorted) { const e = ev.get(r), k = seg(s, e.a, e.b) * (1 - seg(s, e.go, e.land)); if (k > busy) { busy = k; reading = r; } }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ground(ctx, W, H, W / 2, H / 2);
+      camera(ctx, W, H, t >= 1 ? 1 : 1 + 0.012 * busy + punch(s, hits));
       const headA = seg(s, 0.15, 0.7);
       header(ctx, pad, W - pad, story ? 118 : 50, `TIER LIST ${id}`, !story);
-      const count = s < tL ? `CLASIFICANDO · ${landed} / ${n}` : `${n} CARAS · ESCALA PSL`;
+      const count = s >= tL ? `${n} CARAS · ESCALA PSL` : reading ? `ANALIZANDO · ${ev.get(reading).i + 1} / ${n}` : `${n} CARAS · EN COLA`;
       if (!story) {
-        ctx.save(); ctx.globalAlpha = 0.07 * headA; ctx.fillStyle = C.paper; ctx.textAlign = 'right'; ctx.font = font(900, 150, F.d);
+        ctx.save(); ctx.globalAlpha = 0.07 * headA * (1 - busy); ctx.fillStyle = C.paper; ctx.textAlign = 'right'; ctx.font = font(900, 150, F.d);
         ctx.fillText('TIER', W - pad, H / 2 - 6); ctx.fillText('LIST', W - pad, H / 2 + 132); ctx.restore();
         ctx.globalAlpha = headA; ctx.fillStyle = C.acid; ctx.font = font(500, 16, F.m); tracked(ctx, count, W - pad, 78, 2, 'right');
       } else {
@@ -738,8 +802,8 @@ export function rankScene(field, fmt, rows, id = '') {
         ctx.fillStyle = C.acid; ctx.font = font(500, 26, F.m); tracked(ctx, count, W - pad, 262, 2, 'right');
       }
       ctx.globalAlpha = 1;
-      // the rows: dark until a face lands in them. Drawn again over the points once lit, so a face still waiting in
-      // the wall passes behind a label and never burns through it
+      // the rows: dark until a face locks on them. Drawn again over the points once lit, so a face on its way
+      // passes behind a label and never burns through it
       const labels = (over) => shown.forEach((ti, k) => {
         const a = seg(s, 0.1 + k * 0.05, 0.5 + k * 0.05); if (a <= 0 || (over && (!groups[ti].length || s < litAt[ti] - 0.04 || s > tS))) return;
         const y = top + k * rh, g = groups[ti], on = g.length ? seg(s, litAt[ti] - 0.04, litAt[ti] + 0.14) : 0, flash = g.length && s >= litAt[ti] ? Math.exp(-(s - litAt[ti]) * 7) : 0;
@@ -753,52 +817,166 @@ export function rankScene(field, fmt, rows, id = '') {
         ctx.globalAlpha = 1;
       });
       labels(false);
-      // each face: the ground of its cell as it lands, and above the scan line its photograph
+      // each face that has landed: the ground of its cell, and above the scan line its photograph
       sorted.forEach((r) => {
-        const c = cell.get(r), in_ = seg(s, land.get(r) - 0.15, land.get(r) + 0.05);
+        const c = cell.get(r), e = ev.get(r), in_ = seg(s, e.land - 0.15, e.land + 0.05);
         if (c.over || in_ <= 0) return;
         ctx.globalAlpha = in_; ctx.fillStyle = '#0a0d12'; ctx.fillRect(c.x, c.y, c.w, c.h); ctx.globalAlpha = 1;
         photoIn(ctx, r.bust.cut, c, { bottom: lineY });
       });
+      // while a face is read the list steps back: only the labels stay, for the climb
+      if (busy > 0) { ctx.globalAlpha = 0.84 * busy; ctx.fillStyle = C.ink; ctx.fillRect(pad + lw + 6, top - 12, W - pad - lw - 6, bottom - top + 24); ctx.globalAlpha = 1; }
+      if (reading) ghost(ctx, reading.bust, bay, (field ? 0.34 : 0) * seg(s, ev.get(reading).b - 0.05, ev.get(reading).b + 0.15) * (1 - seg(s, ev.get(reading).go, ev.get(reading).go + 0.12)));
       // the faces themselves, as points
       if (field && field.alive) {
         let ok = true;
         if (s < tS) sorted.forEach((r, f) => {
-          const m = clamp((s - start.get(r)) / (land.get(r) - start.get(r)));
-          ok = field.draw({ w: W, h: H, from: 0, to: 1, first: f * pts, n: pts, mix: io(m), delay: 0.5, spread: 30, arc: 0.3, time: s, drift: m <= 0 ? 1.2 : 0.5, size, gain: 0.78 + (m >= 1 ? 0.7 * Math.exp(-(s - land.get(r)) * 8) : 0), keep: f > 0 }) && ok;
+          const [from, to, m] = pose(r, s, f), e = ev.get(r), inBay = s >= e.b && s < e.go, h = seg(s, e.b, e.lock);
+          const zk = inBay ? seg(h, 0.45, 0.58) * (s >= e.lock ? Math.max(0, 1 - (s - e.lock) * 5) : 1) : 0;
+          ok = field.draw({
+            w: W, h: H, from, to, first: f * pts, n: pts, mix: io(m), delay: 0.5, spread: from === to ? 0 : 34, arc: 0.3, time: s, drift: from === 2 ? 0.9 : 0.5, size,
+            gain: (from === 3 ? lerp(0.78, 0.28, busy) : from === 2 || to === 2 ? 0.95 : 0.78) + (s >= e.lock && s < e.land ? 0.8 * Math.exp(-(s - e.lock) * 8) : 0) + (s >= e.land ? 0.6 * Math.exp(-(s - e.land) * 8) : 0),
+            scan: inBay && h < 0.5 ? { y: bay.y + bay.h * (h / 0.5), width: story ? 40 : 26, strength: 1 } : null,
+            focus: zk > 0 ? [zone(r.bust.lm, r.best && r.best.key, bay, zk)] : null, focusDim: 0.45 * zk, keep: f > 0,
+          }) && ok;
         });
-        else ok = field.draw({ w: W, h: H, from: 1, to: 2, mix: frontAt(lineY, H), delay: FRONT, sweep: 1, sweepDir: [0, 1], sweepNoise: FRONT_NOISE, spread: 0, arc: 0, time: s, size, gain: 0.78 });
+        else ok = field.draw({ w: W, h: H, from: 3, to: 4, mix: frontAt(lineY, H), delay: FRONT, sweep: 1, sweepDir: [0, 1], sweepNoise: FRONT_NOISE, spread: 0, arc: 0, time: s, size, gain: 0.78 });
         if (ok) { ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(field.canvas, 0, 0); ctx.globalCompositeOperation = 'source-over'; }
       } else if (s < tL) { // no WebGL: the photographs make the trip
-        sorted.forEach((r) => {
-          const c = cell.get(r), m = io(clamp((s - start.get(r)) / (land.get(r) - start.get(r)))), a = seat(r);
-          if (m >= 1) return;
-          ctx.globalAlpha = c.over ? 1 - m : 1; ctx.drawImage(r.bust.cut, lerp(a.x, c.x, m), lerp(a.y, c.y, m), lerp(a.w, c.w, m), lerp(a.h, c.h, m)); ctx.globalAlpha = 1;
+        sorted.forEach((r, f) => {
+          const [from, to, m0] = pose(r, s, f), m = io(m0), a = place[from](r), b = place[to](r), c = cell.get(r);
+          if (from === 3) return;
+          ctx.globalAlpha = c.over && to === 3 ? 1 - m : 1; ctx.drawImage(r.bust.cut, lerp(a.x, b.x, m), lerp(a.y, b.y, m), lerp(a.w, b.w, m), lerp(a.h, b.h, m)); ctx.globalAlpha = 1;
         });
       }
       labels(true);
-      scanLine(ctx, pad, lineY, W - pad * 2, ps > 0 && ps < 1 ? 1 : 0);
-      // over each face: its frame and its number, counting as it lands
+      // the reading of the face in the bay: its best measure where it is taken, what it stands out for, and its PSL
+      // climbing the rows until it locks
       sorted.forEach((r) => {
-        const c = cell.get(r), at = land.get(r), in_ = seg(s, at - 0.05, at + 0.15), first = sorted[0] === r;
+        const e = ev.get(r), A = seg(s, e.b - 0.08, e.b + 0.1) * (1 - seg(s, e.go, e.go + 0.16));
+        if (A <= 0) return;
+        const h = seg(s, e.b, e.lock), locked = s >= e.lock, hit = locked ? Math.exp(-(s - e.lock) * 9) : 0, g = gauges.get(r), ti = tierIndex(r.psl);
+        if (h > 0 && h < 0.5) { const sy = bay.y + bay.h * (h / 0.5); ctx.globalAlpha = A * 0.9; ctx.fillStyle = C.acid; ctx.fillRect(bay.x + bay.w * 0.06, sy - 1.5, bay.w * 0.88, 3); ctx.globalAlpha = 1; }
+        if (g) {
+          gauge(ctx, g, bay, seg(h, 0.05, 0.45), A * lerp(1, 0.3, seg(h, 0.6, 0.75)));
+          const side = story ? 'r' : 'l', done = h > 0.45;
+          callout(ctx, edge(r.bust.lm, g.y, side, bay), story ? W - 44 : bay.x - 120, g.label.toUpperCase(), fmtMeasure(r.stat.key, r.stat.v * out(seg(h, 0.08, 0.45))), r.stat.ok && done, A * seg(h, 0.05, 0.15), done ? (r.stat.ok ? 'EN SU IDEAL' : `IDEAL ${idealText(r.stat.key)}`) : '');
+        }
+        if (r.best) {
+          ctx.globalAlpha = A * seg(h, 0.45, 0.6); ctx.fillStyle = C.paper; ctx.font = font(500, story ? 26 : 15, F.m);
+          tracked(ctx, `DESTACA EN ${r.best.label.toUpperCase()} · ${r.best.score.toFixed(1)}`, bx, story ? 1356 : bay.y + bay.h - 104, story ? 3 : 2, 'center');
+        }
+        // the PSL, and the row it stands on as it climbs
+        const now = 1 + (r.psl - 1) * (1 - (1 - seg(h, 0.12, 1)) ** 3), k = rowOf(locked ? ti : tierIndex(now)), cl = seg(h, 0.12, 0.2);
+        ctx.globalAlpha = A * cl; ctx.strokeStyle = C.acid; ctx.lineWidth = story ? 5 : 3; ctx.strokeRect(pad - 4, top + k * rh - 4, lw + 8, bh + 8);
+        ctx.fillStyle = locked ? C.acid : C.paper; ctx.font = font(700, (story ? 128 : 62) * (1 + 0.14 * hit), F.d); ctx.textAlign = 'center';
+        ctx.fillText(one(now), bx, story ? 1482 : bay.y + bay.h - 22); ctx.textAlign = 'left';
+        if (locked) { // stamped with its tier, in the colour of its row
+          const sw = story ? 560 : 300, sh = story ? 78 : 44, sy = story ? 1546 : bay.y + bay.h + 26, z = 1 + 0.4 * (1 - out(seg(s, e.lock, e.lock + 0.16))), name = r.tier.toUpperCase();
+          ctx.save(); ctx.translate(bx, sy); ctx.scale(z, z); ctx.globalAlpha = A * Math.min(1, seg(s, e.lock, e.lock + 0.16) * 3);
+          ctx.fillStyle = RAMP[ti]; ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
+          ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; fit(ctx, name, sw - 40, story ? 50 : 28, 900, F.d, 14); ctx.fillText(name, 0, 2);
+          ctx.restore(); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+        }
+        ctx.globalAlpha = 1;
+      });
+      scanLine(ctx, pad, lineY, W - pad * 2, ps > 0 && ps < 1 ? 1 : 0);
+      // over each landed face: its frame and its number
+      sorted.forEach((r) => {
+        const c = cell.get(r), e = ev.get(r), in_ = seg(s, e.land - 0.05, e.land + 0.15) * (1 - 0.6 * busy), first = sorted[0] === r;
         if (in_ <= 0) return;
         ctx.globalAlpha = in_;
         if (c.over) {
           if (groups[c.ti][per - 1] !== r) { ctx.globalAlpha = 1; return; } // one "+N" for the row
-          const more = groups[c.ti].slice(per - 1).filter((o) => s >= land.get(o)).length;
+          const more = groups[c.ti].slice(per - 1).filter((o) => s >= ev.get(o).land).length;
           ctx.strokeStyle = C.faint; ctx.lineWidth = 1.5; ctx.strokeRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2); ctx.fillStyle = C.paper; ctx.font = font(500, story ? 30 : 20, F.m); ctx.textAlign = 'center'; ctx.fillText(`+${more}`, c.x + c.w / 2, c.y + c.h / 2 + 8); ctx.textAlign = 'left';
           ctx.globalAlpha = 1; return;
         }
-        const pulse = first && s >= at ? Math.exp(-(s - at) * 5) : 0;
+        const pulse = first && s >= e.land ? Math.exp(-(s - e.land) * 5) : 0;
         ctx.strokeStyle = first ? C.acid : C.faint; ctx.lineWidth = first ? 3 + 7 * pulse : 1.5; ctx.strokeRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2);
         const ph = story ? 30 : 22; ctx.fillStyle = first ? C.acid : 'rgba(5,7,10,.82)'; ctx.fillRect(c.x, c.y + c.h - ph, c.w, ph);
         ctx.fillStyle = first ? C.ink : C.paper; ctx.font = font(500, story ? 20 : 15, F.m); ctx.textAlign = 'center';
-        ctx.fillText(one(lerp(Math.max(1, r.psl - 1.2), r.psl, out(seg(s, at - 0.05, at + 0.35)))), c.x + c.w / 2, c.y + c.h - (story ? 8 : 6)); ctx.textAlign = 'left';
+        ctx.fillText(one(r.psl), c.x + c.w / 2, c.y + c.h - (story ? 8 : 6)); ctx.textAlign = 'left';
         ctx.globalAlpha = 1;
       });
       const endA = seg(s, tE - 0.1, tE + 0.4);
       if (story) ctaBar(ctx, pad, 1612 + (1 - out(endA)) * 22, W - pad * 2, 58, endA, '¿EN QUÉ FILA CAES?');
       else if (endA > 0) { ctx.globalAlpha = endA; ctx.fillStyle = C.acid; ctx.font = font(500, 17, F.m); tracked(ctx, `¿EN QUÉ FILA CAES TÚ? → ${SITE}`, W / 2, H - 16, 1, 'center'); ctx.globalAlpha = 1; }
+      if (story) timecode(ctx, W, H, s, T, N);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    },
+    // ---- a face of the finished list, looked into (the stage calls these on a click) ----
+    // which face is under a point of the canvas: its index, or -1
+    // "+N" answers too: n + the row it closes (a row unfolded, not a face). open: what is open now; while a row is
+    // unfolded, the faces under the pointer are the ones in its grid.
+    pick(x, y, open = -1) {
+      const inside = (c) => x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h;
+      if (open >= n) { const q = unfolded(shown[open - n]).find(inside); return q ? sorted.indexOf(q.r) : -1; }
+      const i = sorted.findIndex((r) => !cell.get(r).over && inside(cell.get(r)));
+      if (i >= 0) return i;
+      const k = shown.findIndex((ti) => groups[ti].length > per && inside(cell.get(groups[ti][per - 1])));
+      return k >= 0 ? n + k : -1;
+    },
+    rowAt: (i) => sorted[i] || null,
+    // the list with face i opened over it, p: 0 (the list) → 1 (open). Its points leave its cell for the bay, a scan
+    // gives the face back as its photograph, and its own reading stands beside it: PSL, tier, the measures that say
+    // most about it pinned to its edge, and every trait with its note.
+    detail(ctx, i, p) {
+      this.frame(ctx, 1);
+      if (i >= n) { // a row unfolded: every face of the tier leaves the "+N" cell for a grid over the list
+        const k = i - n, ti = shown[k], g = unfolded(ti), from = cell.get(groups[ti][per - 1]), dim = seg(p, 0, 0.35);
+        ctx.globalAlpha = 0.92 * dim; ctx.fillStyle = C.ink; ctx.fillRect(pad + lw + 6, top - 12, W - pad - lw - 6, bottom - top + 24);
+        ctx.globalAlpha = dim; ctx.strokeStyle = C.acid; ctx.lineWidth = story ? 5 : 3; ctx.strokeRect(pad - 4, top + k * rh - 4, lw + 8, bh + 8);
+        ctx.fillStyle = C.acid; ctx.font = font(500, story ? 22 : 14, F.m); tracked(ctx, `${names[ti].toUpperCase()} · ${g.length} CARAS · PULSA UNA`, pad + lw + 16, top + (story ? 26 : 16), 2);
+        ctx.fillStyle = C.dim; tracked(ctx, 'CERRAR ×', W - pad, top + (story ? 26 : 16), 2, 'right');
+        g.forEach((q, j) => {
+          const a = out(seg(p, 0.1 + (0.45 * j) / g.length, 0.55 + (0.45 * j) / g.length)), first = sorted[0] === q.r;
+          if (a <= 0) return;
+          const x = lerp(from.x, q.x, a), y = lerp(from.y, q.y, a), w = lerp(from.w, q.w, a), h = lerp(from.h, q.h, a), ph = Math.max(18, h * 0.14);
+          ctx.globalAlpha = Math.min(1, a * 1.6); ctx.fillStyle = '#0a0d12'; ctx.fillRect(x, y, w, h);
+          ctx.imageSmoothingQuality = 'high'; ctx.drawImage(q.r.bust.cut, x, y, w, h);
+          ctx.strokeStyle = first ? C.acid : C.faint; ctx.lineWidth = first ? 3 : 1.5; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+          ctx.fillStyle = first ? C.acid : 'rgba(5,7,10,.82)'; ctx.fillRect(x, y + h - ph, w, ph);
+          ctx.fillStyle = first ? C.ink : C.paper; ctx.font = font(500, ph * 0.66, F.m); ctx.textAlign = 'center'; ctx.fillText(one(q.r.psl), x + w / 2, y + h - ph * 0.27); ctx.textAlign = 'left';
+        });
+        ctx.globalAlpha = 1;
+        return;
+      }
+      const r = sorted[i], c = cell.get(r), f = i, fly = seg(p, 0, 0.6), sc = seg(p, 0.6, 1), ti = tierIndex(r.psl), A = seg(p, 0.55, 0.9), dim = seg(p, 0, 0.3);
+      ctx.globalAlpha = 0.92 * dim; ctx.fillStyle = C.ink; ctx.fillRect(pad + lw + 6, top - 12, W - pad - lw - 6, bottom - top + 24);
+      ctx.globalAlpha = dim; ctx.strokeStyle = C.acid; ctx.lineWidth = story ? 5 : 3; ctx.strokeRect(pad - 4, top + c.k * rh - 4, lw + 8, bh + 8); ctx.globalAlpha = 1;
+      const lineY = lerp(bay.y - 14, bay.y + bay.h + 14, io(sc));
+      if (sc > 0) photoIn(ctx, r.bust.cut, bay, { bottom: lineY });
+      if (field && field.alive) {
+        if (sc > 0) { ctx.save(); ctx.beginPath(); ctx.rect(0, lineY, W, H - lineY); ctx.clip(); ghost(ctx, r.bust, bay, 0.12); ctx.restore(); }
+        if (field.draw({ w: W, h: H, from: 3, to: 2, first: f * pts, n: pts, mix: io(fly), delay: 0.5, spread: 44, arc: 0.3, time: p * 2, drift: 0.6, size, gain: 0.95 * seg(p, 0, 0.08), scan: sc > 0 ? { y: lineY, cut: -1, width: 34, strength: 1 } : null })) { ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(field.canvas, 0, 0); ctx.globalCompositeOperation = 'source-over'; }
+      } else if (fly < 1) { const m = io(fly); ctx.drawImage(r.bust.cut, lerp(c.x, bay.x, m), lerp(c.y, bay.y, m), lerp(c.w, bay.w, m), lerp(c.h, bay.h, m)); } else if (sc <= 0) photoIn(ctx, r.bust.cut, bay, {});
+      scanLine(ctx, bay.x, lineY, bay.w, sc > 0 && sc < 1 ? 1 : 0);
+      if (A <= 0) return;
+      // whose reading this is, and the way back
+      const px = story ? bay.x : pad + lw + 36, hy = story ? bay.y - 12 : 122;
+      ctx.globalAlpha = A; ctx.fillStyle = C.acid; ctx.font = font(500, story ? 22 : 14, F.m); tracked(ctx, `CARA ${r.n ?? i + 1} · N.º ${i + 1} DE ${n}`, px, hy, 2);
+      ctx.fillStyle = C.dim; tracked(ctx, 'CERRAR ×', bay.x + bay.w, story ? hy : bay.y + bay.h + 20, 2, 'right');
+      // the measures that say most about this face, on its edge
+      let lastY = -1e9; // a readout needs its own height: one too close to the last is left to the list beside the canvas
+      (r.stats || []).forEach((st, j) => { const g = gaugeOf(r.bust.lm, st.key); if (!g || g.y * bay.h - lastY < 104) return; lastY = g.y * bay.h; callout(ctx, edge(r.bust.lm, g.y, 'r', bay), story ? W - 44 : W - pad, g.label.toUpperCase(), fmtMeasure(st.key, st.v), st.ok, seg(p, 0.7 + j * 0.06, 0.9 + j * 0.06), st.ok ? 'EN SU IDEAL' : `IDEAL ${idealText(st.key)}`); });
+      // its number and its tier, in the colour of its row
+      const ny = story ? 1452 : 214, nh = story ? 118 : 70, sw = story ? 300 : 230, sh = story ? 60 : 40, name = r.tier.toUpperCase();
+      ctx.globalAlpha = A; ctx.fillStyle = C.paper; ctx.font = font(700, nh, F.d); ctx.textAlign = 'left'; ctx.fillText(one(r.psl), px, ny);
+      ctx.fillStyle = RAMP[ti]; ctx.fillRect(px, ny + (story ? 22 : 14), sw, sh);
+      ctx.fillStyle = C.ink; ctx.textBaseline = 'middle'; fit(ctx, name, sw - 28, story ? 38 : 26, 900, F.d, 12); ctx.fillText(name, px + 14, ny + (story ? 22 : 14) + sh / 2 + 2); ctx.textBaseline = 'alphabetic';
+      // every trait with its note: what it stands out for lit, its weakest in red
+      const traits = r.traits || [], tx = story ? px + sw + 44 : px, ty = story ? 1352 : 296, tstep = Math.min(story ? 26 : 25, (story ? 226 : 290) / Math.max(1, traits.length)), tpx = Math.min(story ? 19 : 15, tstep - 5), right = story ? bay.x + bay.w : bay.x - 40, barW = story ? 110 : 96;
+      traits.forEach((tr, j) => {
+        const a = seg(p, 0.62 + j * 0.025, 0.82 + j * 0.025), y = ty + j * tstep, good = (r.bests || []).includes(tr.key), bad = (r.weak || []).includes(tr.key);
+        if (a <= 0) return;
+        ctx.globalAlpha = A * a; ctx.font = font(500, tpx, F.m); ctx.textAlign = 'left'; ctx.fillStyle = good ? C.acid : bad ? C.red : C.paper; ctx.fillText(tr.label.toUpperCase(), tx, y);
+        ctx.textAlign = 'right'; ctx.fillText(tr.score.toFixed(1), right, y);
+        const x0 = right - tpx * 3.2 - barW, yb = y - tpx * 0.62;
+        ctx.globalAlpha = A * a * 0.25; ctx.fillStyle = C.paper; ctx.fillRect(x0, yb, barW, tpx * 0.5);
+        ctx.globalAlpha = A * a; ctx.fillStyle = good ? C.acid : bad ? C.red : C.paper; ctx.fillRect(x0, yb, barW * (tr.score / 10) * out(a), tpx * 0.5);
+      });
+      ctx.globalAlpha = 1; ctx.textAlign = 'left';
     },
   };
 }
