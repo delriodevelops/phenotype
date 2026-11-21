@@ -51,6 +51,7 @@ const list = (rows) => `<ul class="lever__list">${rows.map(([n, a]) => `<li><b>$
 const GLOSS = [
   ['PSL', 'Escala de atractivo facial de 1 a 8 nacida en foros de lookism. 4 es la media.'],
   ['SMV', 'Sexual market value: tu valor en el mercado de citas sumando cara, altura, cuerpo, estatus y soltura social.'],
+  ['Hipergamia', 'El esquema del folclore lookism: en apps ellas eligen hacia arriba y la atención se concentra en los tiers altos; en pareja estable cada uno acaba con su igual. El resultado sitúa tu SMV en la escalera del otro sexo. Es un juego, no un dato.'],
   ['LTN · MTN · HTN', 'Low, mid y high tier normie: de la media baja a la alta. En mujeres, LTB, MTB y HTB (becky).'],
   ['Chadlite · Chad', 'Los tiers altos en hombres: top 7 % y top 1 %. En mujeres, Stacylite y Stacy.'],
   ['True Adam · True Eve', 'El canon teórico: todos los rasgos en su ideal. El techo de la escala.'],

@@ -180,6 +180,25 @@ fieldset.field { border: 0; margin: 0; }
 @keyframes lit { from { background: var(--line-2); box-shadow: none; transform: scale(.3); } }
 .among__t { font-size: .9rem; line-height: 1.45; color: var(--muted); }
 .among__t b { display: block; margin-bottom: 4px; font: 700 1.5rem/1 var(--font-display); letter-spacing: -0.02em; color: var(--fg); }
+.scheme { display: block; width: 100%; max-width: 460px; height: auto; }
+.scheme line { stroke: var(--line-2); stroke-width: 1; }
+.scheme__you line { stroke: var(--accent); stroke-width: 1.3; }
+.scheme__you line.is-equal { stroke-width: 2.6; }
+.scheme marker path { fill: var(--accent); }
+.scheme .face rect { fill: none; stroke: var(--line-2); stroke-width: 1; }
+.scheme .face .fig { fill: var(--dim); }
+.scheme .face image { opacity: .45; }
+.scheme .face.is-reach image, .scheme .face.is-you image { opacity: 1; }
+.scheme .face.is-reach rect { stroke: var(--fg); }
+.scheme .face.is-reach .fig { fill: var(--fg); }
+.scheme .face.is-you rect { stroke: var(--accent); stroke-width: 2; }
+.scheme .face.is-you .fig { fill: var(--accent); }
+.scheme text .sub { font-size: 6.5px; letter-spacing: .04em; opacity: .75; }
+.scheme text { font: 500 8px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; fill: var(--dim); }
+.scheme text.is-reach { fill: var(--fg); }
+.scheme text.is-you { fill: var(--accent); }
+.hyper__t { font-size: .9rem; line-height: 1.45; color: var(--muted); max-width: 70ch; }
+.hyper__t b { color: var(--fg); font-weight: 500; }
 .readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); }
 .readout div { display: grid; gap: 6px; padding: 16px; background: var(--bg); }
 .readout dt { font: 500 .68rem/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }

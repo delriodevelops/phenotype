@@ -2,7 +2,7 @@
 // the readings for whoever wants more — tier · PSL · where you fall among a hundred, natural and extreme potential
 // with advice, and every measure against its ideal.
 import { IDEALS } from './face.js';
-import { tierFor, tierLabel, tierNames, NATURAL_RECS, EXTREME_RECS } from './score.js';
+import { tierFor, tierLabel, tierNames, hypergamy, TIER_CUTS, NATURAL_RECS, EXTREME_RECS } from './score.js';
 import { cardScene, tierIndex, topText, pickMeasures } from './card.js';
 import { shareableMarkup, mountShareable } from './shareable.js';
 import { measureLines } from './breakdown.js';
@@ -23,6 +23,65 @@ export function hundred(pct) {
 export function ladderMarkup(psl, sex) {
   const at = tierIndex(psl);
   return `<ol class="ladder">${tierNames(sex).map((t, i) => `<li${i === at ? ' class="is-you"' : i < at ? ' class="is-under"' : ''}>${esc(t)}</li>`).join('')}</ol>`;
+}
+// hypergamy: where this SMV lands on the other sex's ladder, in apps and for a stable couple (score.js hypergamy)
+const P = (q) => `P${q >= 99 ? Math.min(q, 99.9).toFixed(1) : Math.round(q)}`;
+// the scheme, drawn: the seven tiers a side (the best on top), your sex on the left and the other on the right, each
+// tier with its example face where there is one (case 001 through the seven tiers; a figure otherwise) and its PSL.
+// A line joins two tiers the scheme pairs (between the apps reach and the equal). Everyone's lines are faint, yours
+// are lit, and the thick one goes to your equal.
+const FIG = {
+  m: 'M-5-6h10v10h-2.5v9h-2v-9h-1v9h-2v-9H-5z',
+  f: 'M-3-6h6l5 12h-4v7h-2v-7h-2v7h-2v-7h-4z',
+};
+const EXAMPLES = { // 720×900 portraits; f: one generated face (not a real person) taken through the seven tiers
+  m: ['sub5', 'ltn', 'mid', 'mtn', 'chadlite', 'chad', 'trueadam'].map((id) => `img/case/me/${id}.webp`),
+  f: ['sub5', 'ltb', 'mtb', 'htb', 'stacylite', 'stacy', 'trueeve'].map((id) => `img/case/eve/${id}.webp`),
+};
+const CROP = { m: '150 170 420 420', f: '150 110 420 420' }; // the square of each portrait that holds the face
+const TIER_MID = [10, 35, 62.5, 84, 96, 99.45, 99.95]; // the middle percentile of each tier's band
+const pslRange = (i) => (i === 0 ? `PSL <${TIER_CUTS[0]}` : i === 6 ? `PSL ${TIER_CUTS[5]}+` : `PSL ${TIER_CUTS[i - 1]}–${TIER_CUTS[i]}`);
+function schemeMarkup(h) {
+  const span = (r) => [Math.min(r.apps.index, r.stable.index), Math.max(r.apps.index, r.stable.index)];
+  const you = h.stable.index, mine = span(h), T = 40, y = (i) => 46 + (6 - i) * 50, LX = 100, RX = 240;
+  const reach = (i) => i >= mine[0] && i <= mine[1];
+  const own = tierNames(h.sex), other = tierNames(h.other);
+  let faint = '', lit = '', figs = '';
+  const face = (x, i, sex, cls) => {
+    const src = EXAMPLES[sex]?.[i], x0 = x - T / 2, y0 = y(i) - T / 2;
+    return `<g class="face${cls}">${src
+      ? `<svg x="${x0}" y="${y0}" width="${T}" height="${T}" viewBox="${CROP[sex]}"><image href="${src}" width="720" height="900"/></svg>`
+      : `<g class="fig" transform="translate(${x} ${y(i) + 2}) scale(1.35)"><circle cy="-10" r="3"/><path d="${FIG[sex]}"/></g>`}<rect x="${x0}" y="${y0}" width="${T}" height="${T}"/></g>`;
+  };
+  const tag = (x, i, anchor, cls, a, b) => `<text x="${x}" y="${y(i) - 2}" text-anchor="${anchor}"${cls ? ` class="${cls}"` : ''}>${esc(a)}<tspan x="${x}" dy="11" class="sub">${esc(b)}</tspan></text>`;
+  for (let i = 0; i < 7; i++) {
+    const [lo, hi] = i === you ? mine : span(hypergamy(TIER_MID[i], h.sex));
+    for (let o = lo; o <= hi; o++) {
+      const line = `<line x1="${LX + T / 2 + 4}" y1="${y(i)}" x2="${RX - T / 2 - 7}" y2="${y(o)}"`;
+      if (i === you) lit += `${line}${o === you ? ' class="is-equal"' : ''} marker-end="url(#hy-a)"/>`; else faint += `${line}/>`;
+    }
+    figs += face(LX, i, h.sex, i === you ? ' is-you' : '') + face(RX, i, h.other, reach(i) ? ' is-reach' : '')
+      + tag(LX - T / 2 - 8, i, 'end', i === you ? 'is-you' : '', own[i], i === you ? `Tú · ${P(h.own)}` : pslRange(i))
+      + tag(RX + T / 2 + 8, i, 'start', reach(i) ? 'is-reach' : '', other[i], pslRange(i));
+  }
+  const f = h.sex === 'f';
+  return `<svg class="scheme" viewBox="0 0 340 ${y(0) + T / 2 + 6}" role="img" aria-label="Esquema de hipergamia: en apps hasta ${esc(h.apps.tier)}, en pareja estable ${esc(h.stable.tier)}">
+          <defs><marker id="hy-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L8 4L0 8z"/></marker></defs>
+          <text x="${LX}" y="12" text-anchor="middle">${f ? 'Mujeres' : 'Hombres'}</text><text x="${RX}" y="12" text-anchor="middle">${f ? 'Hombres' : 'Mujeres'}</text>
+          <g class="scheme__all">${faint}</g><g class="scheme__you">${lit}</g>${figs}
+        </svg>`;
+}
+export function hypergamyMarkup(pct, sex) {
+  const h = hypergamy(pct.now, sex), nat = hypergamy(pct.natural, sex), f = sex === 'f', them = f ? 'hombres' : 'mujeres';
+  const gain = nat.apps.index > h.apps.index ? ` Con tu potencial natural, en apps ${f ? 'llegarías' : 'subirías'} hasta <b>${esc(nat.apps.tier)}</b>.` : '';
+  return `<div class="block" data-at="end">
+        <h3 class="h3">Hipergamia</h3>
+        ${schemeMarkup(h)}
+        <p class="hyper__t">${f
+    ? `En apps eliges hacia arriba: tu SMV (${P(h.own)} de mujeres) atrae a ${them} hasta <b>${esc(h.apps.tier)}</b>. Para pareja estable, el que se queda es tu igual: <b>${esc(h.stable.tier)}</b>.`
+    : `En apps ellas eligen hacia arriba: tu SMV (${P(h.own)} de hombres) te da acceso a ${them} hasta <b>${esc(h.apps.tier)}</b>. Para pareja estable, tu igual: <b>${esc(h.stable.tier)}</b>.`}${gain}</p>
+        <p class="disclaimer">Esquema del folclore lookism aplicado a tu SMV: en apps la atención se concentra arriba, en pareja estable cada uno acaba con su igual. Es un juego, no un dato sobre personas reales.</p>
+      </div>`;
 }
 
 export function renderResult(root, { scores: s, metrics: m = {}, bust, stage, provisional = false, range = null, assumed = [], demo = false }) {
@@ -50,6 +109,7 @@ export function renderResult(root, { scores: s, metrics: m = {}, bust, stage, pr
         </dl>
         ${assumed.length && !demo ? `<p class="disclaimer">Supuesto (sin responder): ${esc(assumed.join(', '))}. Rellena los datos opcionales para afinar el SMV.</p>` : ''}
       </div>
+      ${hypergamyMarkup(s.percentile, sex)}
       <div class="block" data-at="end">
         <h3 class="h3">Cómo subir</h3>
         <div class="pots">

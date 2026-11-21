@@ -44,6 +44,21 @@ export function facePercentile(psl) {
   return 99.99;
 }
 
+// Hypergamy as the lookism folklore draws it, on the SMV percentile (a toy scheme, and the page says so):
+//   stable: each ends up with their equal, the same percentile of the other sex;
+//   apps:   women choose upwards, so a man at percentile p reaches women up to p^K and, seen from the other side of
+//           the same curve, a woman at p draws men up to p^(1/K). K = 2.5: a P50 man reaches P18, a P50 woman P76.
+const HYPER_K = 2.5;
+const TIER_PCT = [20, 50, 75, 93, 99, 99.9]; // the share of faces under each tier cut (BANDS below)
+export const tierIndexAtPercentile = (q) => TIER_PCT.filter((c) => q >= c).length;
+export function hypergamy(pct, sex) {
+  const s = sex === 'f' ? 'f' : 'm', other = s === 'f' ? 'm' : 'f', names = tierNames(other);
+  const p = clamp(Number.isFinite(pct) ? pct : 50, 0.1, 99.9);
+  const apps = 100 * (p / 100) ** (s === 'f' ? 1 / HYPER_K : HYPER_K);
+  const at = (q) => ({ pct: q, index: tierIndexAtPercentile(q), tier: names[tierIndexAtPercentile(q)] });
+  return { sex: s, other, own: p, apps: at(apps), stable: at(p) };
+}
+
 // The geometry nudge on the browser's PSL: ±0.3 at most, from how many of the landmark measures sit inside their
 // ideal (canthal tilt, FWHR, midface ratio, jaw ratio, symmetry). Ranges as in js/app/face.js IDEALS.
 const GEO = { canthal_tilt_deg: [4, 8], fwhr: [1.85, 2.05], midface_ratio: [0.95, 1.05], jaw_ratio: [0.86, 0.94], symmetry: [88, 100] };

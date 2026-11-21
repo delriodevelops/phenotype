@@ -11,6 +11,7 @@ because they are derived from, or measured against, the MEBeauty database.
 | `public/js/app/breakdown.js` (the `REF` table only) | Where each trait sits among MEBeauty faces | Measured on MEBeauty |
 | `tools/calibration/data/` | Ratings, splits, file lists and fitted weights | Derived from MEBeauty |
 | `public/img/case/`, `public/data/case.json`, `tools/data/` | Case 001: the author's face through the seven tiers | A real person's face: not for reuse outside this project |
+| `public/img/case/eve/` | The seven women's tiers of the hypergamy scheme | AI-generated (Nano Banana 2.1 through Krea), not a real person; placed on the tiers by eye, not measured by the engine |
 
 ## MEBeauty
 
