@@ -6,7 +6,7 @@ import { tierFor, facePercentile } from './score.js';
 import { versusScene, rankScene, verdictOf, topText } from './card.js';
 import { shareableMarkup, mountShareable } from './shareable.js';
 import { specimenId } from './report.js';
-import { breakdown, duel, listed } from './breakdown.js';
+import { breakdown, duel, listed, measureLines, edgeLines } from './breakdown.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const one = (v) => Math.min(v, 8).toFixed(1);
@@ -67,7 +67,16 @@ export function renderVersus(root, [a, b], stage) {
   const side = (r, i, mode) => ({ bust: r.bust.read(mode), psl: r.psl, tier: tierText(r), best: B[i].best.map((t) => t.label) });
   return mountShareable(root, {
     stage, name: 'phenotype-versus',
-    text: `Versus en PHENOTYPE: ${tierText(a)} ${one(a.psl)} vs ${tierText(b)} ${one(b.psl)}. ¿A quién ganas tú? ${location.origin}`,
+    // the winner's edge, measure by measure: where its value sits closer to the ideal than the other's
+    text:
+      [
+        `Versus en PHENOTYPE: PSL ${one(a.psl)} vs ${one(b.psl)}`,
+        ...(
+          winner == null
+            ? ['Empate técnico.']
+            : [`Gana la cara ${winner + 1}:`, ...edgeLines(faces[winner].entry?.face?.metrics, faces[1 - winner].entry?.face?.metrics)]
+        )
+      ].join('\n'),
     build: (f, mode) => versusScene(stage.field, f, side(a, 0, mode), side(b, 1, mode), winner, id, onCard),
   });
 }
@@ -91,7 +100,9 @@ export function renderRanking(root, list, stage) {
   stage.canvas.setAttribute('aria-label', `Tier list de ${rows.length} caras`);
   return mountShareable(root, {
     stage, name: 'phenotype-tier-list',
-    text: `Tier list de ${rows.length} caras en PHENOTYPE. ¿En qué fila caes tú? ${location.origin}`,
+    text: [`Tier list de ${rows.length} caras en PHENOTYPE`,
+    `Arriba: ${tierText(rows[0])} · PSL ${one(rows[0].psl)}/8`, ...measureLines(rows[0].entry?.face?.metrics).filter((l) => l.startsWith('✓')),
+      '¿En qué fila caes tú?'].join('\n'),
     build: (f, mode) => rankScene(stage.field, f, rows.map((r) => ({ bust: r.bust.read(mode), psl: r.psl, tier: tierText(r), sex: r.sex })), id),
   });
 }

@@ -15,6 +15,7 @@ export function shareableMarkup() {
     <div class="tools">
       <div class="share">
         <button type="button" class="btn btn--go" data-share>Compartir</button>
+        <button type="button" class="btn" data-post-x>Publicar en X</button>
         ${videoType() ? '<button type="button" class="btn" data-video>Vídeo</button>' : ''}
         <button type="button" class="btn" data-download>Descargar</button>
         <button type="button" class="btn btn--quiet" data-replay>Ver otra vez</button>
@@ -48,16 +49,29 @@ export async function mountShareable(root, { stage, build, name, text, full = fa
   root.querySelector('[data-replay]').addEventListener('click', () => { if (!busy) stage.run(scene, { full: true }); });
 
   const still = async () => { stage.settle(); return canvasFile(stage.canvas, `${name}-${fmt}`); };
+  const save = (file) => {
+    const url = URL.createObjectURL(file), a = Object.assign(document.createElement('a'), { href: url, download: file.name });
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
   root.querySelector('[data-share]').addEventListener('click', async () => {
     if (busy) return;
-    const r = await shareFile(await still(), text);
+    const r = await shareFile(await still(), `${text} ${location.origin}`);
     note.textContent = r === 'shared' ? '¡Compartido!' : r === 'downloaded' ? 'Tu navegador no comparte imágenes: la he descargado para que la subas.' : '';
   });
   root.querySelector('[data-download]').addEventListener('click', async () => {
     if (busy) return;
-    const file = await still(), url = URL.createObjectURL(file), a = Object.assign(document.createElement('a'), { href: url, download: file.name });
-    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    save(await still());
     note.textContent = 'Imagen descargada.';
+  });
+  // one click, nothing to write: the post opens with its text, and the 16:9 card is saved to attach. No link in the
+  // post (the card prints the address, and X shows posts with links to fewer people).
+  // X's intent cannot carry an image, so the card is downloaded; the window opens first, inside the click, or it is blocked.
+  root.querySelector('[data-post-x]').addEventListener('click', async () => {
+    if (busy) return;
+    window.open(`https://x.com/intent/post?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+    if (fmt !== 'x') { fmt = 'x'; try { localStorage.setItem(FKEY, fmt); } catch {} set('data-fmt', fmt); scene = build(fmt, mode); stage.run(scene, { from: scene.again }); }
+    save(await still());
+    note.textContent = 'Texto listo en X y tarjeta descargada: arrástrala al post y publica.';
   });
   // the reveal itself as a file: the whole thing from the photo, then the card held for a moment
   root.querySelector('[data-video]')?.addEventListener('click', async (e) => {

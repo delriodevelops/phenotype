@@ -80,3 +80,32 @@ export function duel(a, b) {
 }
 // "ojos, mandíbula y piel"
 export const listed = (items) => { const n = items.map((t) => t.label.toLowerCase()); return n.length < 2 ? n.join('') : `${n.slice(0, -1).join(', ')} y ${n[n.length - 1]}`; };
+
+// ---------- the post: real measures against their ideal ----------
+// Each measure as a post reads it: the part of the face (so anyone follows) and the measure's own name (so it is a
+// measure, not an opinion).
+const AREA = {
+  canthal_tilt_deg: ['Ojos', 'canthal tilt'], esr: ['Ojos', 'ESR'], fwhr: ['Pómulos', 'FWHR'], midface_ratio: ['Tercio medio', 'midface ratio'],
+  jaw_ratio: ['Mandíbula', 'jaw ratio'], chin_philtrum: ['Mentón', 'altura/filtrum'], nose_ratio: ['Nariz', 'alar/intercantal'],
+  lip_ratio: ['Labios', 'inferior/superior'], third_lower: ['Tercio inferior', ''], symmetry: ['Simetría', ''],
+};
+const val = (k, v) => k === 'canthal_tilt_deg' ? `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(1)}°` : k === 'symmetry' ? `${Math.round(v)}/100` : k === 'third_lower' ? `${v.toFixed(0)} %` : v.toFixed(2);
+const idealText = (k) => { const i = IDEALS[k]; return i.hi >= i.max ? `${i.lo}+` : `${i.lo}–${i.hi}${i.unit === '°' ? '°' : i.unit === '%' ? ' %' : ''}`; };
+// "Pómulos: FWHR 1.71 (ideal 1.85–2.05)" · with `vs`, the other face's value too: "FWHR 1.94 vs 1.71"
+const say = (k, v, vs) => { const [area, name] = AREA[k]; return `${area}: ${name ? `${name} ` : ''}${val(k, v)}${vs != null ? ` vs ${val(k, vs)}` : ''} (ideal ${idealText(k)})`; };
+
+// a face's measures, closest to the ideal first (symmetry is left out on a turned head: the photo cannot show it)
+function ranked(m) {
+  const turned = Math.abs(m.yaw_deg || 0) >= 12;
+  return Object.keys(AREA).filter((k) => !(k === 'symmetry' && turned)).map((k) => ({ k, v: m[k], c: closeness(k, m[k]) })).filter((x) => x.c != null).sort((a, b) => b.c - a.c);
+}
+// ✓ the two measures inside their ideal (closest first) · ✗ the two furthest outside it
+export function measureLines(m) {
+  const r = ranked(m || {}), inside = r.filter((x) => x.c > 8.5).slice(0, 2), outside = r.filter((x) => x.c < 8.5).slice(-2).reverse();
+  return [...inside.map((x) => `✓ ${say(x.k, x.v)}`), ...outside.map((x) => `✗ ${say(x.k, x.v)}`)];
+}
+// where the winner is closer to the ideal than the loser, the widest gaps first
+export function edgeLines(mw, ml, n = 3) {
+  const lose = Object.fromEntries(ranked(ml || {}).map((x) => [x.k, x]));
+  return ranked(mw || {}).filter((x) => lose[x.k] && x.c - lose[x.k].c > 0.5).sort((a, b) => (b.c - lose[b.k].c) - (a.c - lose[a.k].c)).slice(0, n).map((x) => `✓ ${say(x.k, x.v, lose[x.k].v)}`);
+}

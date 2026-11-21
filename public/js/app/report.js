@@ -5,6 +5,7 @@ import { IDEALS } from './face.js';
 import { tierFor, tierLabel, tierNames, NATURAL_RECS, EXTREME_RECS } from './score.js';
 import { cardScene, tierIndex, topText } from './card.js';
 import { shareableMarkup, mountShareable } from './shareable.js';
+import { measureLines } from './breakdown.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const one = (v) => Math.min(v, 8).toFixed(1);
@@ -71,7 +72,7 @@ export function renderResult(root, { scores: s, metrics: m = {}, bust, stage, pr
   const stats = PINS.filter(([k]) => Number.isFinite(m[k])).map(([k, label, lm, side]) => ({ label, value: fmt(k, m[k]), ok: inRange(k, m[k]), lm, side }));
   return mountShareable(root, {
     stage, full: demo, name: `phenotype-${tierText.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-    text: `Mi cara en PHENOTYPE: ${tierText} · PSL ${one(s.psl.now)}. ¿Y tú? ${location.origin}`,
+    text: [`Mi cara en PHENOTYPE: ${tierText} · PSL ${one(s.psl.now)}/8`, ...measureLines(m), '¿Y tú?'].join('\n'),
     build: (f, mode) => cardScene(stage.field, f, { bust: bust.read(mode), psl: s.psl.now, tier: tierText, sex, percentile: s.percentile.now, smv: s.smv.now, stats: mode === 'hide' ? [] : stats, id }),
   });
 }
